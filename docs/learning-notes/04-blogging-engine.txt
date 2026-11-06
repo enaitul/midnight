@@ -1,0 +1,345 @@
+================================================================================
+MILESTONE 04: BLOGGING ENGINE
+================================================================================
+
+1. MILESTONE OBJECTIVE
+----------------------
+In Milestones 1, 2, and 3, we built the foundation, established PostgreSQL
+database persistence, and implemented dual-provider authentication (Email/Password
+and Google OAuth 2.0).
+
+In this milestone, we construct the core product engine of "midnight.":
+- A complete RESTful Blogging API supporting Create, Read, Update, and Delete (CRUD).
+- Draft vs. Published lifecycles: allowing authors to save private drafts and
+  deliberately publish when ready.
+- Strict authorization & privacy enforcement: visitors and other registered users
+  can NEVER access another author's drafts.
+- Paginated public feed showing excerpts, timestamps, and author identities.
+- Distraction-free writing studio (`/write` and `/write/:id`) with auto-save
+  options and publication triggers.
+- Dedicated reading layout (`/post/:id`) utilizing Lora typography and elegant spacing.
+- Author dashboard (`/my-writings`) with tabbed filtering between all pieces,
+  published stories, and drafts.
+
+2. CRUD OPERATIONS EXPLAINED SIMPLY
+-----------------------------------
+CRUD represents the four fundamental persistent data actions:
+
+1. CREATE: Adding a new post to the database (`POST /api/posts`).
+2. READ: Fetching public feed (`GET /api/posts`), reading an individual post
+   (`GET /api/posts/<id>`), or reviewing personal drafts (`GET /api/posts/mine`).
+3. UPDATE: Modifying title, content, or publication status (`PUT /api/posts/<id>`).
+4. DELETE: Removing a post from the database (`DELETE /api/posts/<id>`).
+
+3. REST API CONCEPTS
+--------------------
+REST (Representational State Transfer) structures interaction around RESOURCES.
+In this milestone, the primary resource is `Post`:
+- Resource collection: `/api/posts`
+- Specific resource member: `/api/posts/<id>`
+
+KEY REST CONVENTIONS APPLIED:
+- Statelessness: Every request carries its own authentication credentials (JWT in
+  `Authorization: Bearer <token>`). The server never stores session cookies on disk.
+- Plural nouns for endpoints: `/api/posts`, not `/api/createPost` or `/api/post`.
+- HTTP methods define the action, not the URL path.
+- Consistent JSON response envelopes.
+
+4. HTTP METHODS AND STATUS CODES
+--------------------------------
+HTTP METHODS USED:
+- `POST`: Used to create a new resource or execute an operation with side-effects.
+- `GET`: Safe, idempotent read operations. Never alters server state.
+- `PUT`: Idempotent replacement or modification of an existing resource.
+- `DELETE`: Removal of a resource.
+
+HTTP STATUS CODES EMPLOYED:
+- `200 OK`: Request succeeded (used on GET feeds, post views, PUT updates, DELETE).
+- `201 Created`: Resource successfully created (`POST /api/posts`).
+- `400 Bad Request`: Client submitted invalid data (e.g. empty title or invalid status).
+- `401 Unauthorized`: Missing or invalid authentication token.
+- `403 Forbidden`: Authenticated, but lacking permission (e.g. trying to edit or
+  delete someone else's post).
+- `404 Not Found`: Post does not exist, OR is a private draft belonging to another user.
+
+5. SQLALCHEMY QUERIES AND RELATIONSHIPS
+---------------------------------------
+In `server/app/models/post.py`:
+  `author_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)`
+  `status = db.Column(db.String(20), default='draft', nullable=False, index=True)`
+  `published_at = db.Column(db.DateTime, nullable=True, index=True)`
+
+INDEXES:
+  We added B-Tree indexes on `status` and `published_at`. Why?
+  Because the public feed executes queries like:
+    SELECT * FROM posts WHERE status = 'published' ORDER BY published_at DESC;
+  Without indexes, PostgreSQL would perform an expensive full table scan O(N).
+  With indexes, lookups and sorting operate in O(log N).
+
+RELATIONSHIP HYDRATION:
+  When a post is serialized with `post.to_dict()`, SQLAlchemy accesses `self.author`.
+  The parent user's `username` and `avatar_url` are embedded directly into the
+  response JSON, eliminating separate frontend roundtrips.
+
+6. AUTHENTICATION AND AUTHORIZATION IN BLOGGING
+-----------------------------------------------
+Beginner mistake: Confusing Authentication with Authorization.
+- Authentication (AuthN): "Are you a valid registered user?" (Checked via `@token_required`).
+- Authorization (AuthZ): "Do you own THIS specific post?"
+
+OUR AUTHORIZATION WORKFLOW:
+  1. Route decorator `@token_required` verifies the JWT and attaches `g.current_user`.
+  2. Route handler fetches the target post by ID.
+  3. Ownership check:
+     `if post.author_id != g.current_user.id: return jsonify({'error': '...'}), 403`
+  Only if both checks pass can the update or deletion proceed.
+
+PRIVACY OF DRAFTS (Information Disclosure Prevention):
+  When a visitor or unauthorized user tries to view a draft:
+  Instead of returning `403 Forbidden` (which reveals that the secret post exists),
+  the server returns `404 Not Found`. This prevents attackers from guessing post IDs
+  to verify if an author is writing something private.
+
+7. DRAFT VS PUBLISHED LIFECYCLE
+-------------------------------
+A post progresses through two distinct states:
+
+  [ New Idea ] ---> Click "Save Draft" ---> status: 'draft', published_at: None
+                          |
+                          v
+                 Click "Publish"
+                          |
+                          v
+                 status: 'published', published_at: UTC timestamp
+
+TRANSITION LOGIC:
+- When a post transitions from `draft` to `published` for the first time,
+  `published_at` is set to the current UTC timestamp (`datetime.now(timezone.utc)`).
+- If an author edits an already published post, `updated_at` refreshes, but
+  `published_at` preserves its original historical timestamp.
+- If an author reverts a published post back to `draft`, it immediately vanishes
+  from the public feed.
+
+8. PAGINATION EXPLAINED WITH EXAMPLES
+-------------------------------------
+Why paginate?
+If a platform has 50,000 blog posts, querying `SELECT * FROM posts` would:
+1. Exhaust server memory.
+2. Transfer tens of megabytes over the network.
+3. Freeze the browser trying to render 50,000 DOM elements.
+
+HOW PAGINATION WORKS (Flask-SQLAlchemy):
+  `Post.query.filter_by(status='published').paginate(page=1, per_page=10)`
+Translates to SQL:
+  `SELECT * FROM posts WHERE status = 'published' ORDER BY published_at DESC LIMIT 10 OFFSET 0;`
+
+For page 2:
+  `LIMIT 10 OFFSET 10;`
+
+JSON RESPONSE FORMAT:
+  {
+    "posts": [... 10 items ...],
+    "total": 42,
+    "page": 1,
+    "pages": 5,
+    "has_next": true,
+    "has_prev": false
+  }
+
+9. BACKEND FILE-BY-FILE EXPLANATION
+-----------------------------------
+server/app/models/post.py
+  - Extended model with `status` (`'draft'` | `'published'`) and `published_at` (nullable datetime).
+  - Added indexes on `status` and `published_at`.
+  - Added `to_dict(include_content=True)` helper supporting full content for readers
+    or 180-character excerpts for feed cards.
+
+server/migrations/versions/5ea5791ac312_add_status_and_published_at_to_posts.py
+  - Migration script adding columns and indexes without dropping existing data.
+
+server/app/services/post_service.py
+  - Contains core domain logic:
+    - `create_post(author_id, title, content, status)`
+    - `get_public_posts(page, per_page)`
+    - `get_post_by_id(post_id, requesting_user_id)`: Implements draft privacy.
+    - `update_post(post_id, user_id, ...)`: Validates ownership before modifying.
+    - `delete_post(post_id, user_id)`: Validates ownership before deleting.
+    - `get_user_posts(user_id, status_filter, page, per_page)`
+
+server/app/routes/posts.py
+  - Blueprinted HTTP routes under `/api/posts`:
+    - `POST /api/posts` (Auth required)
+    - `GET /api/posts` (Public, paginated)
+    - `GET /api/posts/mine` (Auth required, tabbed)
+    - `GET /api/posts/<id>` (Public for published; author-only for drafts)
+    - `PUT /api/posts/<id>` (Auth required, author-only)
+    - `DELETE /api/posts/<id>` (Auth required, author-only)
+
+server/app/__init__.py
+  - Registered `posts_bp` into the Flask app factory.
+
+10. FRONTEND COMPONENT-BY-COMPONENT EXPLANATION
+-----------------------------------------------
+client/src/services/posts.js
+  - Axios wrapper methods: `getFeed()`, `getPostById()`, `createPost()`,
+    `updatePost()`, `deletePost()`, `getMyPosts()`.
+
+client/src/components/Navbar.jsx
+  - Enhanced top bar with quick-navigation pills: "My Writings" and "Write" buttons
+    when authenticated, preserving user profile badge and logout.
+
+client/src/pages/Write.jsx
+  - Unified distraction-free studio for both creating (`/write`) and editing (`/write/:id`).
+  - Seamless "Save Draft" and "Publish" action buttons.
+  - Heading and auto-resizing long-form textarea styled with Playfair Display and Lora.
+
+client/src/pages/Home.jsx
+  - Atmospheric community landing page.
+  - Lists published works with title, author avatar/pen name, publication date,
+    and excerpt.
+  - Full pagination controls ("Previous" / "Next").
+  - Empty state encouraging the first piece of writing when the feed is fresh.
+
+client/src/pages/PostDetail.jsx
+  - Dedicated reading view (`/post/:id`).
+  - Formatted author metadata, publication dates, and clean reading margins.
+  - Author-only controls: dynamically reveals "Edit" and "Delete" buttons if and
+    only if the logged-in user matches `post.author_id`.
+
+client/src/pages/MyWritings.jsx
+  - Author workspace (`/my-writings`).
+  - Filter tabs: "All Pieces", "Published", and "Drafts".
+  - Quick action shortcuts to edit drafts, read published posts, or delete pieces.
+
+client/src/App.jsx
+  - Configured client-side routes for `/write`, `/write/:id`, `/post/:id`, and `/my-writings`.
+
+11. COMPLETE REQUEST/DATA FLOW
+------------------------------
+Example: Author publishes a new poem
+
+1. User types in `/write` and clicks "Publish".
+2. `Write.jsx` calls `postService.createPost(title, content, 'published')`.
+3. Axios request interceptor attaches `Authorization: Bearer <midnight_jwt>`.
+4. Vite proxy forwards `POST /api/posts` to Flask on `localhost:5000`.
+5. Flask executes `@token_required`: decodes token, finds `g.current_user` in PostgreSQL.
+6. `create_post()` creates a new `Post` record with `author_id = g.current_user.id`,
+   `status = 'published'`, and `published_at = datetime.now(timezone.utc)`.
+7. `db.session.commit()` writes the record into PostgreSQL `posts` table.
+8. Flask returns `201 Created` with serialized post data.
+9. React receives the new post ID and navigates the browser to `/post/:id`.
+10. Readers navigating to `/` instantly see the new work in the public feed.
+
+12. TESTING INSTRUCTIONS AND RESULTS
+------------------------------------
+AUTOMATED INTEGRATION TEST RESULTS:
+We ran an automated test suite against the live Flask API and PostgreSQL database:
+
+  [PASS] Check 1: Unauthenticated user cannot create post (HTTP 401).
+  [PASS] Check 2: Authenticated user can create draft (HTTP 201).
+  [PASS] Check 3: Authenticated user can publish post (HTTP 201).
+  [PASS] Check 4: Public feed only shows published posts (Zero draft leakage).
+  [PASS] Check 5: Visitor and User B cannot access User A's draft (HTTP 404).
+  [PASS] Check 6: Author A can read their own draft (HTTP 200).
+  [PASS] Check 7: Author A can edit their own post (HTTP 200).
+  [PASS] Check 8: User B cannot edit User A's post (HTTP 403 Forbidden).
+  [PASS] Check 9: User B cannot delete User A's post (HTTP 403 Forbidden).
+  [PASS] Check 10: Author A can delete their own post (HTTP 200).
+  [PASS] Check 11: My Writings returns author's personal drafts and posts (HTTP 200).
+  [PASS] Check 12: Production frontend build succeeds with zero errors (`npm run build`).
+
+13. COMMON BUGS AND DEBUGGING
+-----------------------------
+BUG: Drafts appearing on the public feed.
+  CAUSE: Omitting `.filter_by(status='published')` on `GET /api/posts`.
+  DEBUG/FIX: Ensure every public query explicitly filters by published status.
+
+BUG: Drafts returning `403 Forbidden` to non-authors.
+  PROBLEM: Information leak! A 403 confirms the post ID exists.
+  DEBUG/FIX: Return `404 Not Found` for unauthorized draft views so attackers
+  cannot enumerate hidden drafts.
+
+BUG: `403 Forbidden` on valid author edits.
+  CAUSE: Comparing integer `post.author_id` with string `user_id` from decoded token.
+  DEBUG/FIX: Ensure `token_util.py` casts the decoded `sub` claim to `int(sub)`.
+
+BUG: White-space collapsing in long-form writing.
+  CAUSE: Standard HTML divs collapse multi-line newlines into single spaces.
+  DEBUG/FIX: Apply Tailwind's `whitespace-pre-wrap` class on post content containers.
+
+14. SDE INTERVIEW PREPARATION (12 QUESTIONS & ANSWERS)
+------------------------------------------------------
+Q1: What is the difference between `PUT` and `PATCH` in RESTful API design?
+A: `PUT` replaces the entire resource or all mutable fields with the provided payload.
+`PATCH` applies a partial update, modifying only the fields included in the request body.
+
+Q2: Why is returning 404 instead of 403 sometimes preferred for security?
+A: Returning 403 (Forbidden) reveals that a resource actually exists at that identifier,
+even if access is denied (information disclosure). Returning 404 (Not Found) conceals the
+resource's existence entirely from unauthorized callers, preventing ID enumeration.
+
+Q3: How does database indexing improve `ORDER BY published_at DESC` performance?
+A: Without an index, the database must retrieve all matching rows into memory and sort them
+(external merge sort / Quicksort) in O(N log N) time. With a B-Tree index on `published_at`,
+the rows are already pre-sorted on disk; the engine simply traverses the index in reverse order
+in O(K) time, where K is the requested page size (`LIMIT`).
+
+Q4: What is the drawback of traditional `OFFSET`-based pagination at large scale?
+A: `OFFSET 100000 LIMIT 10` forces the database engine to scan and discard 100,000 rows
+before returning 10 rows. At high volumes, Keyset Pagination (Cursor Pagination)—where queries
+use `WHERE id < last_seen_id ORDER BY id DESC LIMIT 10`—is much faster because it leverages
+index lookups directly.
+
+Q5: What is an excerpt, and why generate it on the server instead of the client?
+A: An excerpt is a short preview of article content. Generating it on the server prevents
+transmitting full article bodies (which could be megabytes) over the wire for simple feed views,
+drastically reducing network bandwidth and payload sizes.
+
+Q6: What is Idempotency in HTTP?
+A: An HTTP method is idempotent if executing it multiple times produces the identical side-effect
+on the server as executing it once. `GET`, `PUT`, and `DELETE` are idempotent; `POST` is not.
+
+Q7: What is the purpose of `db.session.rollback()` in error handling?
+A: In a relational database transaction, if an error occurs mid-operation, the session is left
+in a poisoned/failed state. Calling `rollback()` aborts the transaction and resets the session
+to its previous clean state, preventing corrupt data or locked connections.
+
+Q8: How does `@token_required` protect Flask routes?
+A: It is a Python decorator wrapping the route handler. Before the route executes, it intercepts
+the incoming request, validates the JWT in the `Authorization` header, queries the corresponding
+user from the database, and injects the user into `g.current_user`. If missing or invalid, it
+aborts immediately with HTTP 401.
+
+Q9: What is the purpose of React's `useParams` hook?
+A: `useParams` extracts dynamic URL parameters defined in React Router route paths (e.g.
+extracting `42` from `/post/:id` or `/write/:id`).
+
+Q10: Why should database foreign keys specify `ondelete='CASCADE'`?
+A: It ensures referential integrity at the database engine level. If a parent record (User)
+is deleted, PostgreSQL automatically deletes all dependent child records (Posts) without
+requiring manual cleanup scripts or leaving orphaned records behind.
+
+Q11: Why sanitize user input with `.strip()` before saving strings to a database?
+A: Leading or trailing whitespace can cause subtle bugs: accidental duplicate usernames
+(`"writer "` vs `"writer"`), misaligned text, and wasteful storage. Trimming guarantees clean,
+canonical data representations.
+
+Q12: How do you prevent Cross-Site Scripting (XSS) when rendering user blog posts in React?
+A: React by default escapes all strings rendered inside JSX brackets (e.g. `{post.content}`).
+It converts `<script>` to `&lt;script&gt;`, neutralizing malicious script injection unless a
+developer explicitly and dangerously uses `dangerouslySetInnerHTML`.
+
+15. KEY TAKEAWAYS
+-----------------
+1. Milestone 4 completes the end-to-end blogging platform: users can write, edit,
+   draft, publish, and delete works.
+2. Posts are governed by strict author authorization and privacy controls.
+3. The public feed is paginated and exclusively serves published pieces.
+4. Database schema migration was applied cleanly with Flask-Migrate.
+5. All Milestone 1, 2, and 3 capabilities (traditional login, Google OAuth, database persistence)
+   remain fully operational.
+
+================================================================================
+END OF MILESTONE 04
+================================================================================
+

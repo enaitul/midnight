@@ -1,0 +1,279 @@
+================================================================================
+MILESTONE 05: COMMUNITY EXPERIENCE, STAGE 1 — ACCOUNT & PROFILES
+================================================================================
+
+1. MILESTONE OBJECTIVE
+----------------------
+In Milestones 1 through 4, we built the foundation, PostgreSQL persistence,
+Google OAuth + JWT authentication, and the core blogging engine.
+
+In this stage, we implement the complete Account and Profile system for midnight.:
+- Rich User Profiles: Profile picture, display name, username, biography,
+  optional age, age visibility preference, and account creation date.
+- Profile Picture System: Uploading, file-type and magic-byte validation,
+  UUID-based file storage on the server, serving via dedicated endpoint,
+  and default fallback avatar display.
+- Privacy-Enforced Age & Sensitive Data Protection: Age is optional and
+  controlled by an `age_public` flag. The backend enforces privacy at the API
+  layer (never sending age, email, or password_hash to unauthorized visitors).
+- Dynamic Contribution Counter: Accurately calculated from the database by
+  counting published writings for each user.
+- Bookmarking / Saved Writings: A dedicated relational model `SavedWriting`
+  with unique constraints preventing duplicate bookmarks, private to each user,
+  and only allowing published pieces to be saved.
+- Public Profile Pages: Displaying an author's identity, bio, contribution count,
+  public age (if permitted), and their collection of published works.
+- Interactive Account Navigation: Connecting the sidebar account link directly
+  to the authenticated user's profile with inline editing, image upload, and tabs
+  for "My Account" vs "Saved Writings".
+
+2. PROFILE ARCHITECTURE & DATA FLOW
+-----------------------------------
+A clean separation of concerns exists between private account management and
+public identity:
+
+                  +----------------------------------+
+                  |         React Frontend           |
+                  +----------------------------------+
+                     |                            |
+       (Private Auth) |                            | (Public View)
+       GET /api/users/me           GET /api/users/<username>
+       PUT /api/users/me                           |
+       POST /api/users/me/avatar                   |
+                     v                            v
+       +----------------------------+   +----------------------------+
+       |   Authenticated User Data   |   |   Sanitized Public Data    |
+       |  - email                   |   |  - display_name & username |
+       |  - age & age_public        |   |  - avatar_url              |
+       |  - contributions count     |   |  - biography               |
+       |  - saved writings          |   |  - age (ONLY IF public)    |
+       +----------------------------+   |  - published posts list    |
+                                        |  - contributions count     |
+                                        +----------------------------+
+
+3. DATABASE RELATIONSHIPS & SCHEMA EVOLUTION
+--------------------------------------------
+MODELS:
+1. `User` (extended):
+   - `display_name` (String 100): Author's chosen pen name.
+   - `biography` (String 500): Profile bio / notes.
+   - `age` (Integer, nullable): Optional user age (0 to 130).
+   - `age_public` (Boolean, default False): Privacy toggle.
+   - `avatar_url` (String 255): Relative URL path to uploaded image or Google picture.
+   - `created_at` (DateTime UTC): Date user joined.
+   - Relationship: `saved_writings = db.relationship('SavedWriting', back_populates='user', cascade='all, delete-orphan')`
+
+2. `SavedWriting` (`saved_writings` table):
+   - `id` (Integer, Primary Key)
+   - `user_id` (ForeignKey to `users.id`, indexed, cascade on delete)
+   - `post_id` (ForeignKey to `posts.id`, indexed, cascade on delete)
+   - `created_at` (DateTime UTC)
+   - Constraint: `UniqueConstraint('user_id', 'post_id', name='uq_saved_writing_user_post')`
+     Ensures a user cannot bookmark the same piece multiple times.
+
+3. `Post` (relationship extension):
+   - `saved_by = db.relationship('SavedWriting', back_populates='post', cascade='all, delete-orphan')`
+
+4. IMAGE UPLOAD WORKFLOW & SECURITY
+-----------------------------------
+Uploading files from the web is a major attack vector. We enforce strict safety:
+
+1. Never Trust the User-Supplied Filename:
+   Attackers could send `../../etc/passwd` or `shell.php`.
+   We discard the client's filename completely and generate a random UUID:
+     `filename = f"{uuid.uuid4().hex}{extension}"`
+   We also wrap it with `werkzeug.utils.secure_filename`.
+
+2. File Type & Extension Whitelisting:
+   Only `image/png` (.png), `image/jpeg` (.jpg), and `image/webp` (.webp) are accepted.
+
+3. File Size Validation:
+   Checked via stream seek: capped at 3 MB (`3 * 1024 * 1024` bytes). Exceeding files
+   receive `HTTP 413 Payload Too Large`.
+
+4. Magic Bytes Inspection:
+   MIME types in request headers can be spoofed by attackers. We read the initial bytes:
+   - PNG: `\x89PNG\r\n\x1a\n`
+   - JPEG: `\xff\xd8\xff`
+   - WebP: `RIFF....WEBP`
+   If the file contents do not match the expected image signature, it is rejected with HTTP 400.
+
+5. Storage Location & Old File Cleanup:
+   Files are saved to `server/app/uploads/avatars/`. If a user replaces an existing
+   uploaded avatar, the previous file is removed from disk to prevent storage bloat.
+
+5. PRIVACY ENFORCEMENT (AGE & SENSITIVE FIELDS)
+-----------------------------------------------
+Rule: Privacy MUST be enforced on the backend.
+If the backend sends `{ "email": "alice@gmail.com", "age": 28, "age_public": false }`,
+any visitor could open Browser DevTools -> Network Tab and read Alice's private data,
+regardless of what React renders.
+
+BACKEND SANITIZATION (`to_public_dict()`):
+```python
+def to_public_dict(self, contribution_count=0):
+    data = {
+        'id': self.id,
+        'username': self.username,
+        'display_name': self.display_name or self.username,
+        'avatar_url': self.avatar_url,
+        'biography': self.biography,
+        'contributions': contribution_count,
+        'created_at': self.created_at.isoformat(),
+    }
+    # Only include age if the user explicitly made it public
+    if self.age_public and self.age is not None:
+        data['age'] = self.age
+    return data
+```
+- `email`, `password_hash`, `google_id`, and `age_public` are NEVER present in public responses.
+- `age` is conditionally included only when `age_public == True`.
+
+6. BOOKMARK / SAVED WRITINGS SYSTEM
+-----------------------------------
+ENDPOINTS:
+- `POST /api/users/me/saved/<post_id>`: Saves a published post for the caller.
+  - Verifies post exists and `status == 'published'`. Unpublished drafts return 404.
+  - Uses `db.session.add` or idempotent return if already saved.
+- `DELETE /api/users/me/saved/<post_id>`: Removes post from caller's bookmarks.
+- `GET /api/users/me/saved`: Returns full list of caller's saved published posts.
+- `GET /api/users/me/saved/ids`: Returns an array of IDs `[1, 4, 12]` so the UI can
+  efficiently highlight the bookmark icon across feeds.
+
+7. FILE-BY-FILE EXPLANATION
+---------------------------
+server/app/models/user.py
+  - Defines `display_name`, `biography`, `age`, `age_public`.
+  - Implements `to_dict()` (private session data) and `to_public_dict()` (sanitized data).
+  - Connects `saved_writings` one-to-many relationship.
+
+server/app/models/saved_writing.py
+  - Implements join table model `SavedWriting` with foreign keys to `users` and `posts`.
+  - Has composite unique constraint `(user_id, post_id)` to prevent duplicates.
+
+server/app/routes/users.py
+  - `GET /api/users/avatars/<filename>`: Serves user-uploaded avatar files securely.
+  - `GET /api/users/<username>`: Public profile retrieval with contributions and published posts.
+  - `GET /api/users/me`: Current user's private account data.
+  - `PUT /api/users/me`: Updates display name, biography, age, and age visibility preference.
+  - `POST /api/users/me/avatar`: Multi-part form image upload handler with signature checks.
+  - `GET /api/users/me/saved`: Retrieves authenticated user's saved writings.
+  - `POST /api/users/me/saved/<id>`: Bookmarks a published writing.
+  - `DELETE /api/users/me/saved/<id>`: Removes a bookmark.
+
+server/app/services/community_service.py
+  - `public_profile(user, viewer_id)`: Assembles public user payload, calculates contribution
+    count using `db.session.query(func.count(Post.id)).filter_by(status='published')`,
+    and fetches author's published posts.
+  - `save_writing(user_id, post_id)`: Validates post status and inserts `SavedWriting`.
+  - `unsave_writing(user_id, post_id)`: Removes `SavedWriting` record.
+
+client/src/services/community.js
+  - Frontend Axios client for `getMyProfile`, `getProfile`, `updateProfile`, `uploadAvatar`,
+    `getSaved`, `save`, and `unsave`.
+
+client/src/pages/Profile.jsx
+  - Unified view for both personal account management and visiting other authors.
+  - When viewing own profile:
+    - Inline edit form with display name, bio, optional age input, and privacy checkbox.
+    - Avatar upload trigger with camera icon.
+    - Tabbed navigation between "My account" and "Saved writings".
+  - When viewing public profile:
+    - Shows author avatar or default fallback.
+    - Author display name, handle, joined date, bio, and age (only if permitted).
+    - Grid of published writings written by that author.
+    - Drafts and saved writings are completely hidden.
+
+client/src/components/Navbar.jsx
+  - Connects the sidebar account link at the bottom directly to `/profile/:username`.
+
+8. TESTING INSTRUCTIONS & RESULTS
+---------------------------------
+AUTOMATED INTEGRATION SUITE (`server/`):
+  [PASS] Profile retrieval & Age privacy enforcement:
+         - Verified `age_public=False` user omits `age`, `email`, and `password_hash`.
+         - Verified `age_public=True` user exposes `age`.
+         - Verified `created_at` timestamp is present.
+         - Verified published writings are included and contribution count is accurate.
+  [PASS] Profile editing:
+         - Successfully updated display name, bio, age, and toggled `age_public` via `PUT /api/users/me`.
+  [PASS] Image upload & validation:
+         - Rejected `text/plain` file with HTTP 400.
+         - Rejected spoofed PNG with fraudulent magic bytes with HTTP 400.
+         - Successfully uploaded genuine PNG, verified UUID filename, and verified image retrieval.
+  [PASS] Bookmarks / Saved Writings:
+         - Unauthenticated save blocked with HTTP 401.
+         - Attempting to bookmark an unpublished draft returns HTTP 404.
+         - Saving published post returns HTTP 201.
+         - Duplicate save attempt prevents duplicate rows in PostgreSQL.
+         - Saved list is private and isolated between users.
+         - Unsaving post removes bookmark record cleanly.
+
+FRONTEND PRODUCTION BUILD:
+  `cd client && npm run build`
+  - Successfully compiled with zero errors.
+
+9. SDE INTERVIEW PREPARATION (10 QUESTIONS & ANSWERS)
+-----------------------------------------------------
+Q1: Why should file uploads never use the original client-provided filename?
+A: User-supplied filenames can include directory traversal sequences (e.g. `../../etc/passwd`
+or `..\Windows\System32`), special characters that corrupt the filesystem, or executable
+extensions (.php, .exe). Replacing the filename with a cryptographically secure UUID and
+whitelisting the extension guarantees safety and eliminates filename collisions.
+
+Q2: What is the difference between checking a file's MIME type vs checking its magic bytes?
+A: The MIME type (e.g. `image/png`) is sent in the HTTP `Content-Type` header by the client and
+can easily be faked using curl or Postman. Magic bytes are the actual initial binary bytes of the
+file (file signature). Checking magic bytes inspects the real contents on disk, ensuring the
+file is genuinely an image rather than an executable script disguised with an `.png` extension.
+
+Q3: Why must privacy controls like `age_public` be enforced on the backend rather than in React?
+A: Frontend rendering logic only controls what is drawn on the screen. If the backend sends
+unfiltered JSON payloads, any user can inspect network responses in their browser DevTools and
+read private data. Security and privacy must be enforced at the server API layer before data
+ever leaves the backend.
+
+Q4: How do database unique constraints prevent race conditions in bookmarking?
+A: If a user double-clicks "Save", two simultaneous requests could reach the server at the same
+millisecond. Application-level checks like `if not already_saved:` could both evaluate to True.
+A database-level `UniqueConstraint('user_id', 'post_id')` ensures the database engine itself
+rejects the duplicate insert, maintaining absolute referential integrity.
+
+Q5: What is the benefit of storing image paths in the database rather than storing image BLOBs?
+A: Storing files on the filesystem or object store (like AWS S3) and keeping only the URL/path
+in PostgreSQL keeps database backups small and fast, avoids ballooning database RAM, and allows
+the web server or CDN to serve static image assets efficiently with HTTP caching and range requests.
+
+Q6: What HTTP status code should be returned when a file exceeds the allowed upload limit?
+A: `HTTP 413 Payload Too Large`.
+
+Q7: What is the difference between a one-to-many and a many-to-many relationship?
+A: In our app: One user authors Many posts (one-to-many). Users can save Many posts, and
+Posts can be saved by Many users (many-to-many), modeled using the `SavedWriting` join table.
+
+Q8: Why does deleting an author use `cascade='all, delete-orphan'` for bookmarks and posts?
+A: Cascade delete ensures that when a parent entity (User) is deleted, all associated child
+records (their posts and bookmarks) are automatically cleaned up, avoiding orphaned foreign key
+errors or dangling pointer records in the database.
+
+Q9: What is an idempotent API endpoint?
+A: An endpoint that produces the exact same server state whether called once or ten times.
+`PUT /api/users/me` and `DELETE /api/users/me/saved/<id>` are idempotent.
+
+Q10: Why use `db.session.query(func.count(Post.id))` instead of `len(user.posts)` for counts?
+A: `len(user.posts)` loads all post rows into Python memory before counting them (wasting RAM
+and CPU). `func.count(Post.id)` executes an optimized `SELECT COUNT(id) FROM posts WHERE ...`
+directly inside the PostgreSQL engine, returning a single integer in milliseconds.
+
+10. KEY TAKEAWAYS
+-----------------
+1. Stage 1 of Community Experience delivers complete account and public profile features.
+2. Avatar uploads are verified by size, extension, and magic bytes, stored via UUID paths.
+3. Age visibility is privacy-controlled at the backend response level.
+4. Bookmarks use a unique constraint join table preventing duplicate saves.
+5. All previous milestones (Auth, Google Login, Blogging Engine, UI Redesign) remain intact.
+
+================================================================================
+END OF MILESTONE 05
+================================================================================
+

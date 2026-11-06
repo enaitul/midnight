@@ -1,0 +1,194 @@
+midnight. — Stage 5: Rich Media Publishing
+==========================================
+
+Purpose
+-------
+This stage lets a writer publish a page with text, photos, audio, video, or a
+mixture. Media is stored as files, while PostgreSQL stores only media metadata.
+This keeps large binary data out of database rows and leaves a clear seam for a
+future object-storage provider.
+
+Design decisions
+----------------
+* The existing Flask, SQLAlchemy, PostgreSQL, and React/Vite stack stays in
+  place. Existing post and authentication endpoints remain in use.
+* The existing PostMedia model and applied database migration already contain
+  the required fields: post relationship, storage filename, original filename,
+  media type, MIME type, size, display order, and creation time. No new schema
+  migration was needed for this implementation.
+* Media bytes live in POST_MEDIA_FOLDER, outside the frontend source tree. The
+  default is server/app/uploads/posts. A storage adapter owns file operations;
+  replacing LocalMediaStorage later does not require changing editor code.
+* Storage keys are random UUID names. The original filename is display
+  metadata only and is never used to construct a path.
+* Allowed formats are JPEG, PNG, WebP, MP3, WAV, OGG, M4A, MP4, and WebM.
+  Defaults are 10 MB per image, 25 MB per audio file, 100 MB per video, and ten
+  attachments per post. Environment variables can change these limits.
+* MIME and extension must agree, and format-specific content checks reject
+  mismatched or malformed inputs. Images are decoded and verified by Pillow;
+  audio/video checks inspect expected container signatures and structure.
+* Draft attachments are private. Both the post's author and a caller with a
+  valid authentication token can preview a draft's media. Published media is
+  publicly readable. Storage paths are validated and never returned by APIs.
+* Delete operations stage files while the database transaction completes so
+  failed database changes can restore the original file. A failed final cleanup
+  may leave a hidden temporary file for operational cleanup, but not a public
+  attachment record.
+
+Request flow
+------------
+
+  React Writing Studio
+      | select files, preview, remove, reorder
+      v
+  POST /api/posts (draft shell when files need uploading)
+      |
+      +--> POST /api/posts/<id>/media (one file per request)
+      |       authenticate -> verify owner -> enforce type/size/content
+      |       -> LocalMediaStorage.save -> insert PostMedia metadata
+      |
+      +--> PUT /api/posts/<id> (save text and publication status)
+      +--> PUT /api/posts/<id>/media/reorder (persist chosen order)
+      |
+      v
+  Feed / post detail / profile / search / My Writings
+      | fetch metadata with post data
+      v
+  GET /api/posts/media/<storage-key>
+      authenticate author for drafts -> resolve safe path -> stream file
+
+Writing Studio
+--------------
+The editor keeps selected files and preview URLs in React state. It validates
+the selected MIME type and per-file size before showing a preview. Preview
+object URLs are revoked when an attachment is removed or the editor unmounts.
+Up and down controls set the sequence. During save, pending files are uploaded
+in that sequence; existing and new IDs are then sent to the reorder endpoint.
+
+Single-file upload requests keep each multipart request within the configured
+maximum request size even when the post has multiple attachments. A draft shell
+is created first when a new post needs media. If an upload fails before the
+post is updated, the editor attempts to remove files uploaded in that attempt
+and delete the temporary shell.
+
+Responsive media in reading surfaces
+------------------------------------
+PostMediaDisplay presents image, audio, and video with native browser controls.
+The feed, post detail, profile writing list, search results, and My Writings
+reuse this component. Draft previews in My Writings are fetched as authenticated
+blob responses so a browser does not accidentally request private content
+without its bearer token.
+
+Files changed
+-------------
+* server/app/storage/__init__.py — marks the storage package.
+* server/app/storage/media_storage.py — local, path-checked file adapter with
+  atomic save and staged delete/restore operations.
+* server/app/config.py — per-media limits, attachment count, request limit.
+* server/app/routes/posts.py — supported format checks, upload and metadata
+  routes, draft privacy, streaming, ordering, and safe deletion.
+* server/requirements.txt — Pillow dependency for image decoding/verification.
+* server/tests/test_rich_media.py — API-level validation and storage tests.
+* client/src/pages/Write.jsx — multi-file selection, previews, ordering, and
+  create/edit upload sequence.
+* client/src/App.jsx — restored the Creator page import so its existing route
+  resolves correctly when visited.
+* client/src/services/posts.js — media metadata and authenticated preview API
+  calls (the existing media calls are used for upload, reorder, and deletion).
+* client/src/components/PostMediaDisplay.jsx — reusable media renderer with
+  authenticated draft preview support.
+* client/src/pages/MyWritings.jsx — attachment display for owned writings.
+* client/src/pages/Profile.jsx — attachment display for public writings.
+* client/src/pages/Search.jsx — attachment display in writing results.
+* client/src/index.css — attachment ordering controls and preview states.
+* docs/learning-notes/09-rich-media-publishing.txt — this guide.
+
+CSS concepts used
+-----------------
+The preview grid uses CSS Grid with auto-fit columns so it can fit different
+screen widths. `min-width: 0` allows grid items to shrink without causing
+horizontal overflow. Media elements use `width: 100%` and `object-fit: contain`
+to stay inside their frame without cropping. Flexbox positions each preview's
+controls. Disabled button styles communicate when an item cannot move farther
+in the current order. CSS variables keep the controls consistent with the
+existing paper/light and charcoal/dark theme colors.
+
+Verification
+------------
+Backend: `python -m pytest -q` from server/ (13 tests passed).
+Frontend: `npm run build` from client/ (Vite production build succeeded).
+The existing browser route list, theme persistence code, and responsive media
+rules were inspected. This workspace has no browser binary or Playwright/
+Puppeteer dependency, so interactive light/dark refresh checks and desktop,
+tablet, and mobile screenshots could not be run here.
+
+Frontend interview questions and answers
+----------------------------------------
+1. Why store media bytes outside the database?
+   Large files are more efficiently served and managed by a file or object
+   store. The database keeps searchable metadata and relationships without
+   carrying large binary payloads in normal post queries.
+
+2. What does the PostMedia row represent?
+   It is a metadata record connecting one stored file to one post. It records
+   the original display name, storage key, MIME type, category, byte size,
+   order, and creation time.
+
+3. Why is the original filename not used as the storage path?
+   User-provided paths can contain traversal sequences or collisions. A random
+   storage key is safer and makes the display name independent from storage.
+
+4. Why check extension, MIME type, and file contents?
+   The extension and MIME type are supplied or inferred at upload time and can
+   be wrong. Inspecting contents catches many mislabeled or corrupt files.
+   These checks are format validation, not a guarantee that media is benign.
+
+5. What does `URL.createObjectURL` do in the editor?
+   It gives the browser a temporary local URL so a selected file can be
+   previewed before upload. It should be revoked when no longer needed.
+
+6. Why send one attachment in each upload request?
+   It bounds each multipart request using the largest allowed single-file size
+   and makes it straightforward to report which file failed.
+
+7. How does the application preserve order?
+   The editor maintains an ordered list and sends its media IDs to the reorder
+   API. The backend validates that every current attachment appears exactly
+   once before writing display_order values.
+
+8. Why are draft media URLs private?
+   Draft text is private, so its attachments must follow the same access rule.
+   The server checks the authenticated owner before streaming a draft file.
+
+9. Why fetch private previews as blobs?
+   An ordinary image or audio URL request does not automatically include the
+   app's bearer token. The API client adds the token, then a temporary blob URL
+   can be assigned to the native media element.
+
+10. What does `send_file(..., conditional=True)` provide?
+    Flask can use conditional and range requests for the media response, which
+    helps browser media controls seek through supported files.
+
+11. Why does the storage adapter validate storage keys?
+    It ensures keys match the generated UUID-and-extension form and resolve
+    directly inside the storage root. This prevents callers from selecting an
+    arbitrary server path.
+
+12. Why stage a file before deleting its database row?
+    If the database transaction fails, the adapter can restore the staged file.
+    The two systems cannot share one transaction, but staging reduces the
+    chance of a row/file mismatch.
+
+13. What is the purpose of `object-fit: contain` for images and video?
+    It preserves the full media frame inside the available layout, rather than
+    cropping edges to fill a fixed box.
+
+14. How can local storage be replaced with cloud object storage?
+    Keep the save, resolve/stream, and delete responsibilities behind the
+    storage adapter interface. A cloud adapter can implement those operations
+    while routes continue using metadata keys and the same authorization rules.
+
+15. Why test draft access and file cleanup separately from successful upload?
+    A successful upload alone does not prove privacy or lifecycle correctness.
+    Separate tests check that unrelated users cannot read drafts and that
+    deleting metadata also removes the corresponding stored file.

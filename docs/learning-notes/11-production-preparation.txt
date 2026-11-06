@@ -1,0 +1,336 @@
+midnight. — Stage 7: Production Preparation
+==========================================
+
+Purpose
+-------
+Prepare the existing Flask, React/Vite, PostgreSQL, and Socket.IO application
+for a deliberate production deployment. This work configures production
+defaults and a hosting plan. It does not create a hosting account, deploy the
+application, migrate uploaded files, or modify database models/migrations.
+
+Development versus production
+-----------------------------
+Development uses the Flask Socket.IO development runner, Vite's proxy, local
+PostgreSQL, and local file storage. The development secret can be generated at
+process start when SECRET_KEY is missing. This makes development convenient,
+but tokens from one restart are not expected to remain valid.
+
+Production is selected with APP_ENV=production. It fails during configuration
+when SECRET_KEY is missing or shorter than 32 characters, DATABASE_URL is
+missing, an origin is missing or unsafe, or media storage is local/unconfigured.
+FLASK_DEBUG is off. The container sets the production environment explicitly.
+Production secrets are supplied by the host's secret manager rather than a
+tracked .env file.
+
+Environment variables and secrets
+---------------------------------
+The production template is deploy/.env.production.example. Important runtime
+values are APP_ENV, FLASK_DEBUG, SECRET_KEY, DATABASE_URL, GOOGLE_CLIENT_ID,
+CORS_ALLOWED_ORIGINS, SOCKETIO_CORS_ALLOWED_ORIGINS, MEDIA_STORAGE_BACKEND,
+S3_BUCKET, S3_REGION, S3_ENDPOINT_URL, S3_PREFIX, AWS_ACCESS_KEY_ID,
+AWS_SECRET_ACCESS_KEY, RATELIMIT_STORAGE_URI, PROXY_FIX_X_FOR, PORT, and
+LOG_LEVEL. Values beginning VITE_ are build-time public configuration and are
+embedded in browser JavaScript. They must never contain secret credentials.
+
+The production app uses PostgreSQL's normal URL and accepts providers that emit
+the older postgres:// scheme by normalizing that scheme. SQLAlchemy uses
+connection health checks and pool recycling. Use provider-required TLS in the
+DATABASE_URL. Pooling limits must be coordinated with the hosting database.
+
+Flask, WSGI, and Gunicorn
+------------------------
+Flask is a WSGI application. WSGI defines how a Python server invokes the web
+application for HTTP requests. The local run.py entry point is not the
+production server. server/gunicorn.conf.py starts run:app using Gunicorn's
+gthread worker, one worker process, and configurable threads. One worker is
+important for Flask-SocketIO's documented Gunicorn deployment. The production
+requirements add Gunicorn and simple-websocket, which supplies WebSocket support
+to the threaded worker. Access and error logs go to standard output/error.
+
+Reverse proxy and WebSockets
+---------------------------
+The recommended host terminates HTTPS at its edge and forwards HTTP to the
+container. It routes normal paths to Flask, serves the Vite build from the same
+origin, and forwards /socket.io WebSocket upgrade requests. ProxyFix is optional
+and only trusts the configured count of proxy forwarding headers. Set
+PROXY_FIX_X_FOR to match the trusted host topology; do not blindly trust
+user-supplied X-Forwarded-For values.
+
+Socket.IO is still configured in threading mode. JWT verification at connect,
+conversation membership checks, room authorization, and message history recovery
+remain in place. Gunicorn uses one worker and this design is intended for one
+application instance. For multiple instances, add a shared Socket.IO message
+queue, correct load-balancer/session handling, and shared rate-limit storage.
+The application has no cross-instance room broadcast implementation yet.
+
+Persistent object storage
+------------------------
+app/storage/media_storage.py now has a provider factory, a local filesystem
+adapter, and a lazy-loaded S3-compatible adapter. Both post media and uploaded
+avatars use the factory. Upload extensions, MIME checks, byte limits, image
+decoding, ownership checks, draft privacy, and database media metadata are
+unchanged. PostgreSQL stores the object's filename/reference and media metadata;
+it does not store the file bytes.
+
+The S3 bucket must be private. boto3 uses the normal AWS credential chain, so
+credentials can come from the host's injected secrets or workload role and are
+not hardcoded. Reads stream from the bucket and preserve video/audio byte-range
+requests. Deletes copy the object to a temporary private key, remove the
+original, then either restore it if the database transaction fails or finalize
+the staged deletion after commit.
+
+The backend selection does not copy existing uploads. Changing an installation
+from local to S3 before moving existing post media and avatars will leave old
+database references pointing to absent S3 objects. Plan and verify a separate
+file migration before changing MEDIA_STORAGE_BACKEND on an existing deployment.
+
+Authentication and rate limiting
+---------------------------------
+Local passwords continue to use Werkzeug password hashing; Google ID tokens
+continue to be verified by the backend. JWT signature and expiration behavior
+is preserved. Login is limited to 20 attempts per minute per client address,
+Google auth to 20 per minute, and registration to 10 per hour. Flask-Limiter
+returns a JSON 429 response. The default memory:// backend is process-local and
+resets on restart. Configure Redis before horizontal scaling. Behind a proxy,
+client address rate limits require a correctly configured trusted ProxyFix hop
+count.
+
+The browser currently stores its application JWT in localStorage. An XSS bug
+could read it. A later auth design could use short-lived in-memory access tokens
+and rotating refresh tokens in HttpOnly, Secure, SameSite cookies, along with
+CSRF protection and revocation. This would change client and API behavior, so it
+is documented as future security work rather than applied in this stage.
+
+CORS, errors, and logging
+------------------------
+REST CORS is limited to /api/* and uses exact origins plus Authorization and
+Content-Type headers. Socket.IO has its own exact allowlist. Production refuses
+localhost, wildcard, and non-HTTPS origins. The single-origin deployment does
+not rely on CORS for same-origin requests, but the allowlist is explicit for
+future supported frontends.
+
+Unexpected exceptions are logged on the server with a traceback and return a
+generic JSON message. API HTTP errors also return JSON. Tokens, secrets, and
+request bodies are not written to application logs. Do not return exception
+strings or stack traces to the browser.
+
+Production frontend build and SPA refresh
+-----------------------------------------
+deploy/Dockerfile builds the React/Vite app using npm ci and npm run build,
+then copies the output into the Python runtime image. Flask serves built assets
+and falls back to index.html for non-API frontend paths, so refreshing /write,
+/profile/name, or /messages returns the client app. VITE_API_BASE_URL defaults
+to /api; VITE_SOCKET_URL can override the socket endpoint and otherwise uses
+the active site origin. VITE_GOOGLE_CLIENT_ID is public OAuth client
+configuration. No frontend build variable is a secret.
+
+Safe migrations and deployment
+------------------------------
+The web process never automatically upgrades the database. Back up data, review
+migration history and the target revision, run the Flask-Migrate upgrade once as
+a release command, and validate with db current and db check. Never reset or
+drop a production database. The deployment image excludes server/app/uploads.
+
+Commands
+--------
+Local backend tests:
+  cd server
+  python -m pytest -q
+
+Frontend verification:
+  cd client
+  npm run lint
+  npm run build
+
+Migration inspection and consistency:
+  cd server
+  python -m flask --app run db current
+  python -m flask --app run db check
+
+Build the production image from the repository root:
+  docker build -f deploy/Dockerfile -t midnight:production .
+
+Production release command (run once from the server working directory after a
+backup and review, never as an automatic app startup hook):
+  python -m flask --app run db upgrade
+
+Troubleshooting
+---------------
+- Refused to start: verify APP_ENV, SECRET_KEY length, DATABASE_URL, exact
+  HTTPS CORS origins, and S3 settings. Never fix this by using a development
+  secret or local upload path in production.
+- 401/403 for media: inspect the media row's post status and author ownership;
+  draft attachments should stay private.
+- 404 media after changing storage: confirm the object exists under the correct
+  prefix. Existing local files are not automatically copied to S3.
+- 413 upload: check Flask's MAX_CONTENT_LENGTH and per-media limits before
+  changing them; preserve proxy request-body limits too.
+- Socket connects but sends fail: check JWT auth, conversation membership,
+  `/socket.io` upgrade forwarding, exact origin, and single-instance topology.
+- Rate limits affect all clients: check proxy hop configuration and use a
+  shared Redis backend when scaling.
+- React refresh returns 404: confirm the Docker image contains client-dist and
+  the Flask frontend fallback is enabled for non-API paths.
+- Migration reports drift: compare Alembic history and database schema. Do not
+  reset the database to clear the warning.
+
+Files changed/added in this stage
+--------------------------------
+- server/app/config.py: production validation, database pool, storage, CORS,
+  limiter, proxy, logging, and frontend build configuration.
+- server/app/__init__.py: CORS/limiter/proxy/logging initialization, generic
+  errors, JSON 429, and the optional production SPA fallback.
+- server/app/storage/media_storage.py: adapter factory, local backend, and S3
+  compatible backend with stream/range and staged delete support.
+- server/app/routes/posts.py and server/app/routes/users.py: route post media
+  and avatars through storage adapters while keeping authorization/validation.
+- server/app/routes/auth.py: endpoint-specific login/registration/Google limits.
+- server/requirements.txt and server/requirements-prod.txt: CORS, limiter,
+  Gunicorn, simple-websocket, and boto3 dependencies.
+- server/gunicorn.conf.py: single-process threaded production worker.
+- client/src/services/api.js plus avatar/media
+  components: environment-configured API and absolute same/origin media URL
+  resolution.
+- client/.env.example: API and socket endpoint examples.
+- server/tests/test_runtime_config.py: production fail-closed checks, SPA
+  refresh, JSON rate-limit/error responses, and mocked S3 range/delete behavior.
+- server/.env.example and .gitignore: local storage/CORS examples and ignored
+  local virtual environments.
+- deploy/Dockerfile, deploy/.env.production.example, and .dockerignore:
+  production image and safe environment template.
+- docs/deployment/production-architecture.md and deployment-checklist.md:
+  reviewed hosting choices, diagram, and release checks.
+- README.md: local commands and production setup.
+
+SDE interview questions and answers
+-----------------------------------
+
+1. What does WSGI do?
+   WSGI is the standard call interface between a Python web application and a
+   synchronous web server. Gunicorn invokes the Flask app through this interface.
+
+2. Why is the Flask development server not a production server?
+   It is intended for local development and does not provide the process,
+   capacity, supervision, and deployment behavior expected from a production
+   WSGI server.
+
+3. Why choose Gunicorn's gthread worker here?
+   The current app uses Flask-SocketIO threading mode. Flask-SocketIO documents
+   Gunicorn's threaded worker with simple-websocket as a compatible option.
+
+4. Why is workers set to one?
+   Flask-SocketIO documents that its Gunicorn deployment mode requires one
+   worker per Gunicorn instance due to Gunicorn's internal load balancing.
+
+5. How should an application scale Socket.IO horizontally?
+   Use multiple single-worker instances behind a capable load balancer, add a
+   shared Socket.IO message queue, and configure the platform's session and
+   WebSocket routing requirements.
+
+6. What is a reverse proxy?
+   It accepts client traffic in front of an app server, handles routing and
+   often TLS, and forwards HTTP requests or WebSocket upgrades to the app.
+
+7. What headers must a proxy preserve for WebSockets?
+   It must use HTTP/1.1 and forward Upgrade and Connection semantics so the
+   initial HTTP request can become a persistent WebSocket connection.
+
+8. Why use object storage for uploads?
+   It persists independently from replaceable application containers and can
+   be shared by app instances without mounting a local disk on every instance.
+
+9. How does the S3 adapter keep drafts private?
+   The bucket is private and the Flask route checks the post's published state
+   or author identity before requesting the object from storage.
+
+10. Why does the adapter stage deletes?
+    It temporarily preserves the object while a database delete is attempted;
+    on transaction failure it can restore the object, and on success it removes
+    the temporary copy.
+
+11. What is CORS?
+    Cross-Origin Resource Sharing is a browser policy controlled by response
+    headers that grants selected origins permission to read a server response.
+    It is not an authentication or authorization mechanism.
+
+12. Why restrict CORS to exact origins?
+    A tight allowlist reduces which browser origins can make credentialed or
+    authorized cross-origin requests. The API still must validate JWTs and
+    authorize each operation.
+
+13. Why not run database migrations at every app startup?
+    Multiple instances could race, and a failed migration could prevent service
+    recovery. A single reviewed release step is easier to back up and roll back.
+
+14. What is the role of Alembic/Flask-Migrate?
+    It stores schema evolution as ordered revisions so the database can be
+    migrated through explicit, reviewable steps.
+
+15. Why use environment variables for configuration?
+    The same build can run in different environments while secrets and host
+    specific values remain outside tracked source files.
+
+16. Why are VITE variables not secrets?
+    Vite substitutes them into the generated browser bundle, which users can
+    download and inspect.
+
+17. What is SPA history fallback?
+    A server returns the SPA's index.html for frontend routes that are not
+    physical files, allowing React Router to render the requested route after a
+    direct visit or refresh.
+
+18. What does ProxyFix do?
+    It rewrites WSGI request metadata based on forwarded headers from a known
+    number of trusted proxies. Trusting too many hops allows spoofed values.
+
+19. Why add rate limits to authentication endpoints?
+    They slow repeated password guesses and automated account creation. Limits
+    should return 429 and should use shared state when multiple app instances
+    serve traffic.
+
+20. What is the limitation of a memory rate-limit backend?
+    Each process has separate counters and counters reset after restarts, so it
+    cannot enforce a global limit across replicas.
+
+21. What is risky about localStorage JWTs?
+    JavaScript running after an XSS flaw can read and exfiltrate the token.
+    HttpOnly cookies reduce JavaScript access but need CSRF protections and an
+    explicit refresh/revocation design.
+
+22. How does the app avoid exposing server exceptions?
+    The server logs unexpected errors, but the client receives a stable generic
+    JSON message rather than exception text or a traceback.
+
+23. How should an engineer verify production configuration?
+    Test startup validation with missing and valid variables, check effective
+    endpoints and origins, run the production build, inspect the image contents,
+    and confirm secrets are absent from the client bundle.
+
+24. How can video seeking work through object storage?
+    The client sends a byte Range request. The server requests that range from
+    S3 and returns status 206 with Content-Range and Content-Length headers.
+
+25. What is a safe release sequence for this application?
+    Back up PostgreSQL, inspect migrations, deploy the new image/config, run one
+    migration command, verify schema and health, then enable traffic and check
+    authentication, media privacy, and Socket.IO recovery.
+
+Verification record
+-------------------
+- Backend: 30 tests passed, including API/authentication/community/media/socket
+  behavior and new configuration, storage-adapter, rate-limit, error-response,
+  and SPA refresh checks.
+- PostgreSQL check: the local development database is at revision
+  7444e90efccd (head); db check reported no upgrade operations. Both commands
+  were read-only.
+- Python compileall passed for the app, runtime entry point, Gunicorn config,
+  and tests.
+- Frontend production build passed. Oxlint exited successfully with 11
+  warnings in existing UI state/effect and fast-refresh patterns.
+- Production configuration tests rejected missing/insecure values and accepted
+  a valid HTTPS/database/S3 configuration. S3 behavior used a fake client, not
+  an external bucket.
+- Socket authentication/realtime authorization tests passed. A real Gunicorn
+  process, reverse-proxy WebSocket, Docker image, cloud bucket, and hosting plan
+  were not exercised. Docker and Unix-only Gunicorn execution are unavailable
+  in this Windows environment. No browser/mobile visual test was run.

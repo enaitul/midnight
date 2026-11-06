@@ -1,0 +1,305 @@
+midnight. — Stage 6: Quality Assurance and Integration
+======================================================
+
+Initial audit
+-------------
+The project uses React 19, Vite, React Router, Axios, and Socket.IO on the
+frontend, with Flask, SQLAlchemy, Flask-Migrate, PostgreSQL, and Flask-SocketIO
+on the backend. Routes are grouped by auth, posts, users, search,
+conversations, notifications, and health. Models use foreign keys and
+SQLAlchemy relationships. Alembic reports one linear migration head.
+
+Before changes, the PostgreSQL database reported migration head
+7444e90efccd and `flask db check` found no schema differences. The existing
+backend suite had 13 tests, mostly using isolated in-memory SQLite. The root
+README only described basic local startup. The development entrypoint always
+enabled Flask debug mode and the config had a known fallback signing key.
+
+The audit found: a six-hour Google token clock-skew allowance; Google account
+linking to local accounts whose email had not been verified; avatar uploads
+that checked a short file signature but did not decode the image; activity
+notifications whose delivery error could make an already-saved action look
+like a failed request; old notification titles remaining visible after a post
+was made private; realtime chat events broadcast to conversation rooms that
+could retain a removed member; and a reconnect path that did not reload missed
+message history. It also found incomplete setup/test instructions.
+
+Integration testing
+-------------------
+Integration testing checks that multiple parts of an application work
+together at a boundary. For midnight., examples include an authenticated
+Flask request writing both a post and media metadata, a Socket.IO event being
+delivered only to current members, or an API response being consumed by the
+React service layer.
+
+Testing levels:
+
+* A unit test isolates one small function, such as a serializer or validator.
+* An integration test joins components such as a Flask route, SQLAlchemy
+  session, and SQLite test database.
+* An end-to-end test runs the browser interface through a complete user action
+  and checks the rendered result against a running backend.
+
+The backend suite here is mainly API integration testing. It exercises request
+validation, authentication, SQLAlchemy persistence, file storage, and
+Socket.IO test clients. No browser automation package or browser executable is
+installed in this workspace, so browser playback and rendered desktop/tablet/
+mobile interaction were not tested and are not claimed below.
+
+How the frontend and backend connect
+------------------------------------
+The browser calls the Axios client in `client/src/services`. In development,
+Vite forwards `/api` and `/socket.io` to Flask on port 5000. The Axios request
+interceptor adds the midnight JWT from localStorage. Flask's token decorator
+checks the token and loads its user before protected handlers run. Socket.IO
+uses the same token during connection and joins an authenticated per-user
+room. The backend persists data before emitting realtime updates.
+
+Authentication and authorization testing
+-----------------------------------------
+Tests cover registration, local login, invalid and expired JWT rejection,
+public profile privacy, post ownership, draft access, private media access,
+saved writing isolation, direct-conversation membership, group admin actions,
+and a removed member's still-connected socket. Google credential verification
+is mocked in the account-linking test; a live Google provider flow was not run.
+
+The Google token verifier now allows only 60 seconds of clock drift. A verified
+Google address cannot attach itself to a pre-existing local account unless
+that local account is already marked email-verified. The application currently
+has no local email-verification workflow, so such linking is rejected rather
+than silently weakening the local password boundary.
+
+Database and transaction testing
+---------------------------------
+Tests create isolated SQLite schemas and temporary media directories; they do
+not drop or seed the configured PostgreSQL database. `flask db current` and
+`flask db check` were run as read-only checks. The database is at the current
+Alembic head and model metadata has no unapplied migration differences. No
+migration was generated or applied in this QA pass.
+
+Post/media deletion stages files so a failed database commit can restore a
+file. Avatar replacement now writes the new image and commits its URL before
+removing the previous image. If the commit fails, it rolls back and tries to
+remove the newly written image, leaving the old profile picture intact.
+
+Media security
+--------------
+Post media use random storage keys, path validation, supported extensions,
+MIME checks, file-size limits, and content structure checks. Draft media is
+served only to its author. Avatar uploads now decode and verify JPEG, PNG, and
+WebP images with Pillow, reject corrupt files, and enforce a pixel-count cap.
+The media directory is outside the frontend public source tree. Public media
+is still served by this Flask process from local disk; this requires persistent
+storage and a deployment plan before using multiple app instances.
+
+No `dangerouslySetInnerHTML`, direct `innerHTML`, or `eval` usage was found in
+the React source scan. React renders writing, comments, and messages as text.
+This is a source-level observation, not a full penetration test. JWTs remain in
+localStorage, which increases the impact of a future cross-site scripting bug.
+
+Socket.IO testing and recovery
+------------------------------
+The test suite uses Flask-SocketIO test clients to authenticate, join a direct
+conversation, exchange messages, and check access restrictions. Conversation
+messages and updates are now emitted to the authenticated user rooms belonging
+to the current database membership. Removing a member emits a private removal
+event to that user's room, and subsequent messages are not sent to that user's
+socket even if it still occupies an old conversation room.
+
+The React chat reconnect handler reloads the open conversation's history and
+marks it read. Socket sends use an acknowledgement timeout; after a timeout the
+client checks server history instead of silently leaving the submit button
+locked or retrying blindly. Realtime emit errors are logged without converting
+already-persisted messages or membership changes into failed API responses.
+
+Bugs found and fixes
+-------------------
+1. Six hours of accepted Google-token clock drift weakened expiry checks.
+   Reduced the window to 60 seconds and made provider errors generic to users.
+2. A verified Google email could link to an unverified local account.
+   Linking now requires the existing account to be verified too.
+3. Avatar signature checks accepted corrupt images, and old images were removed
+   before the database commit. Pillow now verifies content and old-image
+   cleanup happens after a successful commit.
+4. Realtime notification errors could bubble up after an action had committed.
+   Notification persistence and delivery failures are logged separately.
+5. A notification could keep disclosing a post title after the post returned to
+   draft status. The serializer now returns no title for non-published posts.
+6. A removed group member could receive later broadcasts through a stale room.
+   Events now target current member user rooms and a removal event updates the
+   removed member's client.
+7. Chat reconnects did not recover missed messages, and a missing socket ack
+   could leave the send flow unresolved. History reload and ack timeout handling
+   were added.
+8. The config used a known development signing key and `run.py` always enabled
+   debug. Development now uses an ephemeral key when unset; production requires
+   a key of at least 32 characters. Debug is opt-in and development-only.
+9. Invalid JWT errors included parser details. Responses now use a generic
+   invalid-token message.
+10. The avatar and comment editor had weak/crowded states. Corrupt avatars now
+    return a validation error, and comment input uses a simple placeholder.
+11. Setup instructions omitted environment configuration, migrations, and
+    tests. README and development requirements now document these steps.
+
+Files changed
+-------------
+* `README.md` — local setup, environment, migrations, tests, and deployment
+  boundaries.
+* `server/.env.example` — explicit `APP_ENV` setting.
+* `server/requirements-dev.txt` — test dependency plus runtime requirements.
+* `server/app/config.py` — production secret validation and debug setting.
+* `server/run.py` — debug mode is opt-in and development-only.
+* `server/app/services/auth_service.py` — smaller Google clock skew, safe
+  account-linking rule, and generic provider errors.
+* `server/app/utils/token_util.py` — generic invalid-token response.
+* `server/app/routes/users.py` — decoded avatar validation and safer
+  replacement transaction ordering.
+* `server/app/services/notification_service.py` — isolated persistence and
+  realtime error handling.
+* `server/app/models/notification.py` — suppress draft titles in notifications.
+* `server/app/services/conversation_service.py` — current-member event fan-out
+  with delivery failure logging.
+* `server/app/routes/conversations.py` — user-room delivery and removal/update
+  events for membership changes.
+* `server/app/socket_events.py` — current-member message delivery.
+* `server/tests/test_community_api.py` — auth, privacy, profile, notifications,
+  and group membership regressions.
+* `server/tests/test_rich_media.py` — upload, privacy, missing-file, cleanup,
+  and media-only post integration cases.
+* `server/tests/test_runtime_config.py` — production secret requirement.
+* `client/src/pages/Messages.jsx` — reconnect history, read state, event-driven
+  membership updates, and socket acknowledgement timeout.
+* `client/src/components/PostEngagement.jsx` — remove an unused prop and simplify
+  the comment placeholder.
+* `client/src/pages/Home.jsx` and `client/src/pages/PostDetail.jsx` — remove the
+  unused engagement prop.
+* `docs/learning-notes/10-quality-and-integration.txt` — this guide.
+
+Commands
+--------
+Install the backend test requirements from the repository root:
+
+  python -m pip install -r server/requirements-dev.txt
+
+Run backend tests from `server/`:
+
+  python -m pytest -q
+
+Check the configured database without applying migrations:
+
+  python -m flask --app run db current
+  python -m flask --app run db check
+
+Run the frontend checks from `client/`:
+
+  npm run lint
+  npm run build
+
+Verified results for this pass: 22 backend tests passed; the frontend
+production build succeeded; lint exited successfully with 11 React/Fast Refresh
+warnings; the database was at head `7444e90efccd` and `db check` found no
+migration operations. Browser-based checks were unavailable.
+
+Known limitations and remaining risks
+-------------------------------------
+* No browser binary or Playwright/Puppeteer package is installed. Actual audio
+  and video playback, page refresh behavior, theme interactions, and responsive
+  rendering were not tested in a browser.
+* Google verification was mocked; live provider credentials and network
+  behavior were not tested.
+* The root entrypoint remains a development server. Public deployment needs a
+  production WSGI/Socket.IO server, HTTPS, monitoring, rate limits, backups,
+  and operational configuration.
+* Media is stored locally. Multi-instance deployments need shared durable
+  storage and a coordinated Socket.IO message queue.
+* Post serialization performs per-post engagement counts, and public profile
+  responses currently return all published writings. These can create query
+  growth as data increases and should be measured before large-scale use.
+* Authentication tokens are stored in localStorage. Continue preventing XSS
+  and consider a carefully designed HttpOnly-cookie migration separately.
+* Automated coverage does not replace a penetration test, concurrency test,
+  load test, or review of live production secrets and infrastructure.
+
+SDE interview questions and answers
+-----------------------------------
+1. What is integration testing?
+   It verifies that connected parts work together, such as a Flask route,
+   authentication decorator, database session, and serialized response.
+
+2. How is it different from a unit test?
+   A unit test isolates one small unit. An integration test crosses component
+   boundaries and catches mismatched contracts or transaction behavior.
+
+3. How is an end-to-end test different?
+   It drives the user-facing application, often in a browser, through actual
+   navigation and actions. It includes more of the stack and costs more to run.
+
+4. Why use an application factory in Flask?
+   It lets tests create independent app configurations and databases while
+   reusing the same route and extension setup.
+
+5. Why do tests use SQLite here while the app uses PostgreSQL?
+   SQLite makes isolated route tests quick and prevents touching user data.
+   It does not reproduce every PostgreSQL behavior, so schema checks and
+   selected integration checks should also run against PostgreSQL.
+
+6. What is object-level authorization?
+   It checks access to the specific resource requested, such as confirming a
+   post author owns a post or a user is a member of a conversation.
+
+7. Why return 404 for a private draft to an unauthorized user?
+   It avoids confirming that a private object exists. The response hides the
+   distinction between a missing draft and an inaccessible one.
+
+8. Why are JWT expiry and signature both important?
+   The signature prevents modification; expiry limits how long a stolen token
+   remains useful. The server must verify both for each protected request.
+
+9. Why is a large clock-skew allowance risky?
+   It extends the period in which an expired token is accepted. Small clock
+   drift can be tolerated without accepting hours-old credentials.
+
+10. Why should image uploads be decoded after checking a MIME type?
+    MIME metadata is client-controlled. Decoding checks that the bytes form a
+    supported image and can reject malformed or mislabeled data.
+
+11. Why store media outside database rows?
+    Filesystems and object stores are suited to large binary objects. Database
+    rows can hold ownership and display metadata without large payloads.
+
+12. Why are database and file deletion not one atomic transaction?
+    A filesystem rename and a SQL commit do not share a transaction manager.
+    Staging a file allows the application to restore it if the DB commit fails.
+
+13. What is a foreign key cascade?
+    It tells the database to remove dependent rows when the referenced row is
+    deleted, preventing orphaned relational records.
+
+14. Why can a Socket.IO room cause an authorization issue?
+    Room membership can outlive a database membership change. Private events
+    should be addressed to users who are authorized at the time of delivery.
+
+15. Why persist a message before emitting it?
+    If realtime delivery fails, the message remains in history and can be
+    recovered on reconnect. The transport is not the source of truth.
+
+16. How does a reconnect history fetch prevent message loss?
+    It asks the server for persisted messages after the transport reconnects,
+    then merges them by ID with messages already displayed.
+
+17. What does an Alembic migration check do?
+    It compares ORM metadata with the connected database schema and reports
+    whether a migration operation appears missing. It does not apply changes.
+
+18. Why avoid sending raw exception text to clients?
+    Exception details can reveal implementation or infrastructure information.
+    Logs can retain diagnostic detail while clients receive a stable message.
+
+19. Why does localStorage create a security tradeoff for bearer tokens?
+    JavaScript can read it, so an XSS bug could steal the token. HttpOnly cookies
+    reduce that exposure but require deliberate CSRF and session design.
+
+20. Which deployment risks remain after these tests?
+    Local media durability, rate limiting, monitoring, secret management, live
+    OAuth validation, browser playback, and query scaling still need deployment
+    and operational testing.

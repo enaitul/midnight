@@ -1,0 +1,10 @@
+**/.env
+**/.env.*
+!.env.example
+**/node_modules
+**/dist
+**/__pycache__
+**/*.py[cod]
+server/app/uploads
+.git
+.pytest_cache

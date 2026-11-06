@@ -1,0 +1,248 @@
+================================================================================
+MILESTONE 06: COMMUNITY EXPERIENCE, STAGE 2 — SEARCH & DISCOVERY
+================================================================================
+
+1. MILESTONE OBJECTIVE
+----------------------
+In Stage 1 (Milestone 05), we built the complete Account & Profiles subsystem.
+In this stage, we implement the complete Search & Discovery engine for midnight.:
+- Unified Discovery Interface: A dedicated search canvas accessible from the
+  sidebar navigation (`/search`).
+- Dual-Category Search: Tabbed filtering between "Writings" and "Users".
+- Writings Search: Case-insensitive search across post titles and post content,
+  strictly isolating published works and guaranteeing zero draft leakage.
+- Users Search: Case-insensitive search across usernames and display names,
+  returning profile pictures, bios, handles, and contribution counts while
+  strictly respecting profile privacy rules.
+- SQL Injection & Wildcard Sanitization: Escape mechanisms for `%`, `_`, and `\`
+  preventing SQL wildcard manipulation, backed by parameterized SQLAlchemy queries.
+- Pagination: Full database-level pagination for both writings and users with
+  `page`, `per_page`, `pages`, `total`, `has_next`, and `has_prev`.
+- Frontend Debouncing & AbortController: 350ms debouncing preventing request floods,
+  with request cancellation handling to avoid out-of-order race conditions.
+- Consistent Styling: Dark/light responsive theme styling in midnight.'s poetic aesthetic.
+
+2. SEARCH ARCHITECTURE & DATA FLOW
+-----------------------------------
+```
+User types in Search input ("midnight")
+       |
+       v (React state `query` updates)
+       |
+350ms Debounce Window (cleared if typing continues)
+       |
+       v (Debounce timer completes)
+AbortController.abort() cancels any in-flight previous request
+       |
+       v
+HTTP GET /api/search?q=midnight&type=writings&page=1
+       |
+       v (Flask Search Blueprint)
+Input Sanitization: Length check (<=100), trim, escape wildcards
+       |
+       v
+SQLAlchemy Query:
+  SELECT * FROM posts
+  WHERE status = 'published'
+    AND (title ILIKE '%midnight%' OR content ILIKE '%midnight%')
+  ORDER BY published_at DESC
+  LIMIT 15 OFFSET 0;
+       |
+       v
+Serialized JSON with pagination metadata -> React renders result cards
+```
+
+3. SQLALCHEMY FILTERING & CASE-INSENSITIVE MATCHING
+--------------------------------------------------
+CASE-INSENSITIVE OPERATOR (`.ilike()`):
+Standard SQL `LIKE` is case-sensitive: `'Midnight' != 'midnight'`.
+In PostgreSQL, `ILIKE` performs case-insensitive pattern matching:
+```python
+pattern = f"%{escaped_term}%"
+Post.query.filter(
+    Post.status == 'published',
+    or_(
+        Post.title.ilike(pattern, escape='\\'),
+        Post.content.ilike(pattern, escape='\\')
+    )
+)
+```
+
+WILDCARD SANITIZATION (Security & Accuracy):
+In SQL `LIKE` syntax:
+- `%` represents zero or more arbitrary characters.
+- `_` represents any single character.
+If a user searches for `"100%"`, unescaped SQL would treat `%` as a wildcard matching
+everything. We escape special characters before generating the pattern:
+```python
+escaped = term.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
+pattern = f'%{escaped}%'
+```
+The query explicitly sets `escape='\\'`.
+
+4. DATABASE INDEXING FOR SEARCH
+-------------------------------
+In Stage 2, we applied an Alembic migration (`39959ba3020f_add_index_to_users_display_name.py`)
+to add an index to `users.display_name`:
+- `users.username` already had an index (`ix_users_username`).
+- `users.display_name` now has a B-Tree index (`ix_users_display_name`).
+- `posts.status` and `posts.published_at` have indexes, allowing the database to
+  rapidly filter `status = 'published'` before executing text scans.
+
+5. FRONTEND DEBOUNCING & ABORT CONTROLLER
+-----------------------------------------
+WHAT IS DEBOUNCING?
+Without debouncing, typing "reflection" (10 characters) fires 10 rapid HTTP requests
+to the backend. This wastes server CPU, clogs the network, and can cause race conditions
+where the result for "ref" arrives AFTER the result for "reflection".
+
+OUR IMPLEMENTATION:
+```javascript
+useEffect(() => {
+  const term = query.trim()
+  if (!term) { setResults([]); return }
+
+  const controller = new AbortController()
+  const timeout = window.setTimeout(async () => {
+    try {
+      const data = await communityService.search(term, tab, page, controller.signal)
+      setResults(data.results || [])
+    } catch (err) {
+      if (err.name !== 'CanceledError' && err.name !== 'AbortError') {
+        setError('Search failed')
+      }
+    }
+  }, 350)
+
+  return () => {
+    window.clearTimeout(timeout)
+    controller.abort() // Cancels previous pending request
+  }
+}, [query, tab, page])
+```
+Benefits:
+1. Zero server requests while the user is actively typing.
+2. If a request is in flight when the user types again, `controller.abort()` cancels
+   the previous network connection immediately.
+
+6. DRAFT EXCLUSION & PRIVACY
+----------------------------
+DRAFT EXCLUSION:
+Public searches MUST NEVER disclose an author's unpublished work.
+In `server/app/services/community_service.py`:
+`Post.status == 'published'` is permanently hardcoded into `search_writings()`.
+Draft posts (`status == 'draft'`) can never be matched or returned.
+
+USER PRIVACY:
+`search_users()` runs each matching user through `public_profile()`:
+- `email`, `password_hash`, `google_id` are strictly omitted.
+- `age` is only included if the author set `age_public == True`.
+- `contributions` is dynamically calculated from published posts.
+
+7. FILE-BY-FILE EXPLANATION
+---------------------------
+server/app/models/user.py
+  - Added `index=True` to `display_name` column.
+
+server/migrations/versions/39959ba3020f_add_index_to_users_display_name.py
+  - Migration script applying index `ix_users_display_name`.
+
+server/app/services/community_service.py
+  - `search_writings(term, page, per_page)`: Executes case-insensitive ILIKE query on
+    published posts, orders newest first, and returns paginated envelope.
+  - `search_users(term, viewer_id, page, per_page)`: Searches usernames and display names,
+    formats with `public_profile()`, and returns paginated envelope.
+
+server/app/routes/search.py
+  - `GET /api/search`: Validates `q` (<=100 chars) and `type` ('writings' or 'users'),
+    sanitizes inputs, delegates to service, and returns structured JSON with pagination.
+
+client/src/services/community.js
+  - Updated `communityService.search(query, type, page, signal)` accepting `page` parameter.
+
+client/src/pages/Search.jsx
+  - Responsive search canvas with auto-focus input.
+  - Category tabs for Writings and Users.
+  - Debounced execution (350ms) with `AbortController` cancellation.
+  - Displays post excerpts, author metadata, publication dates, and user profiles.
+  - Integrated pagination controls ("Previous" / "Next") with page counter.
+
+8. TESTING INSTRUCTIONS & RESULTS
+---------------------------------
+AUTOMATED INTEGRATION SUITE (`server/`):
+  [PASS] Test 1: Empty search query returns `results: []`, `total: 0`, and HTTP 200.
+  [PASS] Test 2: Search writings by title matches published posts accurately.
+  [PASS] Test 3: Search writings by content matches terms inside post body.
+  [PASS] Test 4: Case-insensitive search (UPPERCASE "MIDNIGHT") matches mixed-case titles & bodies.
+  [PASS] Test 5: Draft exclusion: unpublished drafts containing search keywords are NEVER returned.
+  [PASS] Test 6: Search users by username returns author handle, bio, and contribution count.
+  [PASS] Test 7: Search users by display name matches pen names accurately.
+  [PASS] Test 8: No-result search returns empty list with friendly UI state.
+  [PASS] Test 9: Pagination: page 1 & 2 return distinct sliced result sets with accurate metadata.
+  [PASS] Test 10: Special character escaping (`%`, `_`) safely handled without syntax errors or wildcards.
+
+FRONTEND PRODUCTION BUILD:
+  `cd client && npm run build` -> Built in 405ms with zero errors.
+
+9. SDE INTERVIEW PREPARATION (10 QUESTIONS & ANSWERS)
+-----------------------------------------------------
+Q1: What is the difference between SQL `LIKE` and `ILIKE`?
+A: `LIKE` is case-sensitive (standard SQL). `ILIKE` is a PostgreSQL extension that performs
+case-insensitive pattern matching without requiring `LOWER(column) LIKE LOWER(pattern)`.
+
+Q2: Why is `or_(title.ilike(pattern), content.ilike(pattern))` preferred over client-side filtering?
+A: Client-side filtering requires fetching all records from the database into server memory
+and transferring them to the browser. At scale, this crashes the server and consumes gigabytes of
+bandwidth. Pushing filtering to PostgreSQL allows the database engine to utilize indexes, disk
+caches, and CPU acceleration, returning only the 15 matching rows needed.
+
+Q3: What is Debouncing and how does it differ from Throttling?
+A:
+- Debouncing: Delays invoking a function until a certain amount of time has elapsed since the
+  LAST time it was triggered. If the user keeps typing, the timer resets. (Ideal for search inputs).
+- Throttling: Enforces a maximum number of executions over a given time period (e.g. at most once
+  every 300ms, regardless of how many times it was triggered). (Ideal for scroll or resize events).
+
+Q4: Why should search queries sanitize `%` and `_` characters?
+A: In SQL `LIKE` statements, `%` matches any sequence of characters and `_` matches any single
+character. If a user searches for `"50%"`, unescaped SQL treats `%` as wildcard matching everything.
+Escaping them (`\%` and `\_`) ensures they are treated as literal characters.
+
+Q5: What is an `AbortController` in modern JavaScript and why use it in search?
+A: `AbortController` allows aborting one or more web requests as and when desired. In search,
+if a user searches for "cat" and immediately changes it to "dog", the "cat" request can be
+aborted in-flight so its delayed response doesn't overwrite the newer "dog" results.
+
+Q6: What is the purpose of database indexes on search columns like `username` and `display_name`?
+A: Indexes store sorted references to table rows. For prefix searches like `'john%'` or equality
+checks, B-Tree indexes provide O(log N) lookup instead of O(N) full table scans.
+
+Q7: How do you support full-text search (FTS) in PostgreSQL for large-scale production?
+A: For large datasets, `ILIKE '%term%'` cannot use standard B-Tree indexes because of the leading
+wildcard. Production systems use PostgreSQL Full-Text Search with `tsvector` and `tsquery` backed
+by GIN (Generalized Inverted Index) indexes, or external search engines like Elasticsearch/Typesense.
+
+Q8: Why does the search endpoint enforce a maximum search length (e.g. 100 characters)?
+A: To protect against Denial of Service (DoS) attacks. Unbounded search strings can be used by
+attackers to execute enormous pattern matching queries that consume excessive database CPU cycles.
+
+Q9: What happens if an unauthenticated user searches on midnight.?
+A: Search is a public discovery feature. Unauthenticated visitors can freely search published
+writings and public author profiles. Drafts and private account data remain protected.
+
+Q10: Why must `tab` switches reset `page` to 1?
+A: If a user is on page 4 of Writings and switches to Users (which might only have 1 page of results),
+keeping `page=4` would result in an empty state or 404. Resetting `page=1` ensures valid pagination.
+
+10. KEY TAKEAWAYS
+-----------------
+1. Stage 2 provides a responsive, debounced search experience across writings and users.
+2. Case-insensitive PostgreSQL `ILIKE` is secured with wildcard escaping.
+3. Pagination is implemented end-to-end on both server and client.
+4. Draft exclusion and user privacy guarantees are strictly maintained.
+5. Codebase remains fully verified with zero regressions.
+
+================================================================================
+END OF MILESTONE 06
+================================================================================
+

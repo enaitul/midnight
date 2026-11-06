@@ -1,0 +1,379 @@
+midnight. — Community Experience
+================================
+
+1. Milestone objective
+----------------------
+This milestone turns the community navigation, profile, search, saved-writing,
+and messaging screens into connected features. The work keeps the existing
+React/Vite, Flask, SQLAlchemy, PostgreSQL, JWT, and Flask-Migrate architecture.
+New database tables and columns are additive; existing users and posts are kept.
+
+2. Features implemented
+-----------------------
+- Reordered the sidebar to Feed, New post, Messages, Search, and About. On
+  mobile it uses icons only, with the account picture and name in the top bar.
+- Set the midnight. wordmark in a quiet serif face. The feed now opens with the
+  signed-in greeting and Begin a new page? followed by Recent writings.
+- Added public profiles and a private owner edit view for display name, bio,
+  optional age, and age visibility. PNG, JPEG, and WebP profile-picture uploads
+  are size limited and checked against their file signatures.
+- Added published-writing contribution counts, calculated from database rows.
+- Added private saved-writing records and controls on the feed and detail view.
+- Added database search for published writing and public user fields. The UI
+  debounces requests and has loading, error, and empty states.
+- Added persistent one-to-one and group conversations, message history, unread
+  counts, group administrators, membership changes, and leaving groups.
+- Added authenticated Socket.IO connect, join, and send events. REST and socket
+  sends both save to the database before messages are delivered.
+- Combined the product and creator details in About, including the supplied
+  creator photo, name, motivation, LinkedIn, and portfolio links.
+- Added post likes, comments, Author labels on the author's own comments, and
+  image/audio/video attachments with previews. Enter submits comments and sends
+  chat messages; Shift+Enter inserts a line break.
+- Posts may omit a title, and photo/video posts can be published without body
+  text. Attached media is stored with a 25 MB combined request limit.
+- Kept the complete feed writing, theme toggle, drafts, publishing, and editing.
+
+3. Architecture and data flow
+-----------------------------
+React pages use `communityService`, which calls the Flask JSON API through the
+existing Axios instance. The request interceptor attaches the existing JWT.
+Flask route handlers validate input and authentication, call SQLAlchemy models
+and services, then return JSON. PostgreSQL persists profiles, saved-writing
+records, conversations, participants, and messages.
+
+For live chat, Socket.IO authenticates the same JWT during the connection. A
+client must ask to join a conversation room; the server checks that the user is
+a participant. A socket send checks membership again, validates the text, saves
+the message, and only then emits it to that conversation room. REST message
+history uses the same database. A reconnect or another login can reload history.
+
+The Vite development server proxies `/api` to Flask on port 5000. In development,
+the Socket.IO client connects directly to `http://127.0.0.1:5000` so the browser
+can establish a WebSocket. Set `VITE_SOCKET_URL` to choose another server. In
+production, it defaults to the frontend origin, so a reverse proxy must forward
+`/socket.io` with WebSocket upgrade support. Set
+`SOCKETIO_CORS_ALLOWED_ORIGINS` to the permitted browser origins. Production
+hosting must use a shared, persistent avatar directory if it runs more than
+one server instance.
+
+4. Database models and relationships
+------------------------------------
+`User` gains `display_name`, `biography`, `age`, and `age_public`. A user has
+many posts, saved writings, and conversation memberships. Public serializers
+never return email. Age is included in public profile data only when
+`age_public` is true; the signed-in owner can see their own age and email.
+
+`SavedWriting` links one user to one post. A unique constraint prevents saving
+the same post twice. Foreign keys cascade when a user or post is removed. The
+API only allows published posts to be saved and always scopes reads to the
+signed-in user.
+
+`Conversation` is either `direct` or `group`. A unique sorted `direct_key`
+prevents duplicate one-to-one conversations. `ConversationParticipant` links a
+user to a conversation and records the `admin`/`member` role, join time, and
+last-read time. `Message` belongs to a conversation and sender, and stores up
+to 5,000 characters with a timestamp. Foreign keys and indexes support member
+lookups and chronological history.
+
+Migration `8d4c2b91f6a0` follows the existing Milestone 4 head. It adds fields,
+tables, constraints, and indexes. It does not drop existing tables. Existing
+users receive their username as the initial display name.
+
+5. API endpoints and responsibilities
+--------------------------------------
+Profiles and saved writings:
+- `GET /api/users/<username>` — public profile with published contribution
+  count; no email; age only when the owner made it public.
+- `GET /api/users/me` and `PUT /api/users/me` — signed-in owner's private
+  profile and editable profile fields.
+- `POST /api/users/me/avatar` — authenticated image upload, max 3 MB.
+- `GET /api/users/avatars/<filename>` — serve an uploaded profile image.
+- `GET /api/users/me/saved` and `/api/users/me/saved/ids` — owner's saved list
+  and IDs.
+- `POST` or `DELETE /api/users/me/saved/<post_id>` — save or unsave a published
+  writing for the current user.
+
+Search:
+- `GET /api/search?q=<term>&type=writings` — title/content search over
+  published posts only, returning excerpts.
+- `GET /api/search?q=<term>&type=users` — username/display-name search with
+  public profile fields only.
+
+Conversations:
+- `GET /api/conversations` — conversations for the current participant,
+  including each one's unread count.
+- `POST /api/conversations/direct` with `user_id` — find or create a direct
+  conversation.
+- `POST /api/conversations/groups` with `name` and `member_ids` — create a
+  named group; creator becomes its administrator.
+- `GET /api/conversations/<id>` — conversation and participants, membership
+  required.
+- `GET /api/conversations/<id>/messages` — persisted history, membership
+  required; `limit` and `before` support older-page retrieval.
+- `POST /api/conversations/<id>/messages` with `body` — validate and persist a
+  message, then emit it to joined conversation sockets.
+- `POST /api/conversations/<id>/read` — update the caller's read timestamp.
+- `POST /api/conversations/<id>/participants` — administrator adds users.
+- `DELETE /api/conversations/<id>/participants/<user_id>` — administrator
+  removes a member.
+- `POST /api/conversations/<id>/leave` — a group member leaves; sole admin
+  rights transfer to another member when needed.
+
+Post engagement and media:
+- `POST /api/posts/<id>/like` — toggle a like for the signed-in user.
+- `GET /api/posts/<id>/comments` and `POST /api/posts/<id>/comments` — read
+  and add comments to published posts.
+- `POST /api/posts/<id>/media` and `DELETE /api/posts/<id>/media/<media_id>` —
+  add or remove up to five image, audio, or video attachments.
+- `GET /api/posts/media/<filename>` — serve attachments; draft media remains
+  private to its author.
+
+Every conversation and message route returns 404 for a non-member, avoiding
+information leaks about private conversation IDs. Group participant changes
+require administrator membership. Socket events are `join_conversation`,
+`send_message`, and `new_message`.
+
+6. Real-time messaging concepts
+-------------------------------
+REST remains the source for conversation lists and message history. Socket.IO
+keeps a connected page informed without polling. A room is a server-side group
+of sockets for one conversation; only validated members join it. JWT
+authentication identifies a socket user. Membership is checked both when
+joining and when sending. The server persists each message before broadcasting
+it, so the database remains the record after refresh or reconnect.
+
+7. Search implementation
+------------------------
+The search form waits 350 ms after the last keystroke and then calls the
+selected backend search type. An AbortController cancels obsolete requests.
+SQLAlchemy searches the database with case-insensitive matching. `%` and `_`
+are escaped so they behave as literal input. Writing search explicitly filters
+to `published`; draft content and private account fields are not returned.
+
+8. Profile and privacy implementation
+-------------------------------------
+The public profile serializer returns username, display name, avatar, bio, and
+published contribution count. It never calls the private user serializer and
+does not include email. It adds age only after checking `age_public`. Private
+account data is read and edited through token-protected `/me` endpoints.
+Contributions use a database count of posts whose status is published. Avatar
+uploads accept PNG, JPEG, and WebP, validate the file signature and size, save
+with a generated filename, and store only the served URL on the user.
+
+9. File-by-file explanation
+---------------------------
+Backend:
+- `app/models/user.py`, `post.py` — profile columns and author display name.
+- `app/models/saved_writing.py` — private bookmark relationship.
+- `app/models/conversation.py` — conversations, memberships, and messages.
+- `app/models/post_engagement.py` — likes, comments, and media metadata.
+- `app/models/__init__.py` — register every model with Flask-Migrate.
+- `app/services/community_service.py` — public profile counts, search, saves.
+- `app/services/conversation_service.py` — message validation, participant
+  authorization helpers, direct/group creation, membership management.
+- `app/routes/users.py`, `search.py`, `conversations.py` — JSON API endpoints.
+- `app/socket_events.py` — authenticated socket events and room membership.
+- `app/__init__.py`, `app/config.py`, `run.py` — extension and blueprint setup,
+  upload configuration, and Socket.IO development server.
+- `migrations/versions/8d4c2b91f6a0_add_community_profiles_saves_and_messaging.py`
+  — additive schema migration.
+- `migrations/versions/a73f829ce041_add_post_likes_comments_and_media.py` —
+  additive likes, comments, and media migration.
+- `requirements.txt` — Flask-SocketIO dependency.
+- `tests/test_community_api.py` — integration tests using an isolated SQLite
+  database and authenticated Socket.IO test clients.
+
+Frontend:
+- `src/App.jsx` — profile, search, message, and About routes.
+- `src/components/Navbar.jsx`, `BookmarkButton.jsx` — ordered navigation,
+  account link, theme control, and saved-writing action.
+- `src/services/community.js` — profile, search, saved, and conversation API.
+- `src/pages/Home.jsx` — simplified full-writing feed and greeting.
+- `src/pages/Profile.jsx` — public/owner profile, editing, photo, saved list.
+- `src/pages/Search.jsx` — debounced writing and user search.
+- `src/pages/Messages.jsx` — direct/group chat, unread indicators, and Enter-to-send.
+- `src/pages/About.jsx` — combined product and creator story.
+- `src/components/PostEngagement.jsx`, `PostMediaDisplay.jsx` — likes,
+  comments, and feed/detail media display.
+- `src/pages/PostDetail.jsx` — published writing, media, and engagement.
+- `src/pages/Write.jsx` — optional title, attachment selection, and previews.
+- `src/context/AuthContext.jsx` — refresh signed-in user after profile edits.
+- `src/index.css` — theme-aware responsive community styles.
+- `vite.config.js`, `package.json`, `package-lock.json` — WebSocket proxy and
+  Socket.IO browser client dependency.
+- `../../../assets/images/creator.png` — existing creator image imported into
+  the built frontend; no asset filename was guessed.
+
+10. Commands executed
+---------------------
+- `npm install socket.io-client` — installed the Socket.IO browser client.
+- `python -m pip install 'Flask-SocketIO>=5.3,<6'` — installed the server
+  Socket.IO extension and its threaded WebSocket support.
+- `python -m pytest -q` from `server` — 7 tests passed.
+- `python -m compileall -q app migrations/versions tests` from `server` — passed.
+- `npm run build` from `client` — passed.
+- `npm run lint` from `client` — completed with React hook/Fast Refresh warnings.
+- Flask-Migrate `db upgrade` on a temporary SQLite database — all existing
+  migrations and the new migration applied successfully.
+- Upgraded a temporary SQLite database from the previous migration head after
+  inserting a legacy user. The row remained, got its username as display name,
+  and all four new tables were present.
+- Ran Edge headless browser checks against the Vite and Flask development
+  servers. These covered registration, draft save/edit/publish, complete feed
+  paragraphs, profile image upload, age privacy, public email omission, saved
+  writings, writing/user search, draft exclusion, About pages, and theme
+  persistence after refresh.
+- Used two independent authenticated browser contexts and two separately
+  authenticated Node Socket.IO clients forced to use `transports=['websocket']`
+  to verify live message delivery over WebSockets. Reloading the conversation and
+  opening it again restored persisted history. The group creation UI was also
+  exercised with multiple registered members.
+- Checked 390px mobile feed, profile, and message layouts, including horizontal
+  overflow. The first mobile pass found a content offset; the responsive CSS
+  was corrected and the retest aligned the content to the viewport.
+
+11. Testing instructions and expected results
+----------------------------------------------
+Configure `server/.env` with `DATABASE_URL` pointing to the PostgreSQL database
+and a non-default `SECRET_KEY`. Install the server dependencies, then run:
+
+    cd server
+    python -m pip install -r requirements.txt
+    python -m flask --app run db upgrade
+    python -m pytest -q
+    python run.py
+
+The tests use SQLite and should report seven passing tests. They cover public
+age privacy and contribution counts, avatar validation/serving, database
+search without drafts, local registration, draft creation/edit/publication,
+full feed content, private saved lists, direct/group messages, membership
+access checks, and live delivery between two separately authenticated socket
+test clients.
+
+In another terminal:
+
+    cd client
+    npm install
+    npm run dev
+
+Expected manual checks:
+1. Register Alice and Bob in separate browser sessions. Publish a post as
+   Alice, then find its whole body in Feed as Bob.
+2. Save that post as Bob; it appears in Bob's Account > Saved writings and not
+   in Alice's saved list.
+3. Search the title and a username. Published writings and matching users show
+   under separate tabs; a draft never appears.
+4. Edit a profile, upload a valid image under 3 MB, and set an age. The public
+   profile hides age until its privacy option is checked and never shows email.
+5. Start a direct chat between the two accounts. Keep both pages open and send
+   a message; it should appear on both. Refresh either page; history remains.
+6. Create a group with Alice, Bob, and a third account. Verify add/remove/leave
+   controls, including that non-admin members cannot manage membership.
+7. Try a conversation URL as an account outside that conversation; its API
+   response should be 404.
+8. Check sidebar order, About pages, theme refresh persistence, and narrow
+   mobile layout. The creator image should load from the imported project asset.
+
+The two-user live delivery check passed with distinct authenticated browser
+contexts as well as with distinct Socket.IO test clients. A PostgreSQL service
+was not configured in this workspace, so the migration was applied to SQLite;
+run it against the deployment PostgreSQL database before release. Google OAuth
+was not tested because it requires a configured provider client and credentials.
+
+12. Common errors and debugging
+-------------------------------
+- `DATABASE_URL` missing or refused: start PostgreSQL and set the URL in
+  `server/.env` before running Flask or migrations.
+- New columns/tables missing: run `python -m flask --app run db upgrade` from
+  the server folder and confirm the current head is `8d4c2b91f6a0`.
+- Socket shows disconnected: keep Flask on port 5000 and Vite on 5173, and
+  confirm the page origin is allowed by `SOCKETIO_CORS_ALLOWED_ORIGINS` and the
+  connection reaches Flask. Production proxies need WebSocket upgrade support.
+- Socket says authentication required: sign in again so the current JWT is
+  present in `midnight_token`; expired tokens are rejected.
+- A conversation returns 404: confirm the signed-in user is a participant.
+- Avatar upload fails: use PNG, JPEG, or WebP no larger than 3 MB; ensure the
+  configured avatar folder is writable and persistent.
+- Search looks empty: verify that the writing is published, not a draft, and
+  search text matches a title/content or username/display name.
+- Creator image is missing in a build: preserve the existing
+  `assets/images/creator.png` file at the repository root.
+
+13. SDE interview questions and answers
+---------------------------------------
+1. Why use a migration instead of recreating tables?
+   A migration changes the schema in small steps while keeping existing rows.
+   This migration adds columns and new tables, then fills the initial display
+   name from the old username.
+
+2. How does the API keep profile email private?
+   Public routes use `to_public_dict`, which has an explicit allowlist of
+   public fields. The private `to_dict` serializer is used only on authenticated
+   owner routes and auth responses.
+
+3. How is age privacy enforced?
+   The public serializer checks `age_public` on the server before adding age to
+   its response. Hiding a field only in React would not protect the API.
+
+4. How is the contribution count made meaningful?
+   The service counts database posts with the user's ID and published status.
+   It does not trust a browser-supplied total or include drafts.
+
+5. Why have a SavedWriting table?
+   A separate relationship row connects a user and a post and records when it
+   was saved. A unique constraint prevents duplicate bookmarks and foreign
+   keys clean up rows when their user or post is removed.
+
+6. How are direct conversations kept unique?
+   The two participant IDs are sorted and joined into a stable direct key. A
+   database unique constraint prevents two requests from creating duplicates.
+
+7. How does the server stop a user reading another conversation?
+   Every REST history/detail request verifies a participant row. The socket
+   server also checks membership before joining a room and before saving a
+   socket message.
+
+8. Why persist before broadcasting a message?
+   The database remains the source of truth. If a browser disconnects during
+   delivery, the recipient can still load the saved message from history.
+
+9. What is a Socket.IO room?
+   It is a server-managed group of connected clients. This app names a room for
+   each conversation and only joins a socket after checking membership.
+
+10. What is the JWT used for on a socket?
+    The client sends its existing application token during the connection
+    handshake. Flask verifies it and records the user ID for later membership
+    checks, just like the REST authorization flow.
+
+11. Why debounce search?
+    A short delay waits until typing pauses, reducing duplicate database
+    requests. AbortController cancels a stale request when the query or tab
+    changes.
+
+12. Why filter drafts on the backend?
+    A frontend filter can be bypassed. The writing query itself requires
+    published status, so a draft is never included in a public search response.
+
+13. Why validate avatar signatures as well as MIME type?
+    A browser-provided content type can be false. A size limit and file
+    signature check reduce accidental or disguised non-image uploads.
+
+14. What is the role of a conversation participant record?
+    It both grants access and stores the member's role, join time, and last-read
+    time. It is the common authorization check for REST and sockets.
+
+15. Why test using two socket clients?
+    One client sending to itself cannot prove delivery to another user. The
+    integration test authenticates separate clients, joins the same room, sends
+    a message, and verifies the recipient receives the event.
+
+16. Key takeaways
+-----------------
+Keep public serializers deliberately small, enforce membership at every data
+boundary, and store messages before sending live events. Search and contribution
+counts should come from database queries. Migrations should extend a working
+schema rather than replacing it. A later additive migration adds persisted post
+likes, comments, and media attachments. The About page includes the creator
+details supplied by the project owner.

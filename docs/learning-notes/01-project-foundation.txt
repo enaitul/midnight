@@ -1,0 +1,488 @@
+================================================================================
+MILESTONE 01: PROJECT FOUNDATION
+================================================================================
+
+1. MILESTONE NAME
+-----------------
+Project Foundation — Setting up the React frontend, Flask backend, and
+connecting them together.
+
+2. OBJECTIVE
+-----------
+Before we can build any features (login, blog posts, profiles), we need a
+solid foundation. This milestone ensures:
+
+- The React frontend can run and show a web page.
+- The Flask backend can run and respond to requests.
+- The two can talk to each other (React calls Flask's API).
+- Our design system (colors, fonts) is configured.
+- The project structure is clean, modular, and ready for feature development.
+
+Think of this like pouring the foundation of a house — no walls or rooms yet,
+but everything that comes later rests on this.
+
+3. CONCEPTS EXPLAINED
+---------------------
+
+FRONTEND vs BACKEND:
+  The frontend is what the user sees and interacts with in their browser —
+  buttons, text, forms, colors. The backend is the server that handles data,
+  business logic, and database operations. The frontend asks the backend
+  for data and the backend sends it back.
+
+SINGLE PAGE APPLICATION (SPA):
+  Traditional websites load a new HTML page from the server every time you
+  click a link. A Single Page Application loads one HTML page and then
+  JavaScript handles all navigation by swapping content in and out. This
+  makes the app feel faster and more responsive. React builds SPAs.
+
+REST API:
+  REST (Representational State Transfer) is a standard way for the frontend
+  and backend to communicate. The frontend sends HTTP requests (GET, POST,
+  PUT, DELETE) to specific URLs (called endpoints), and the backend responds
+  with JSON data. It is like a menu at a restaurant — the API defines what
+  you can order (endpoints), and the backend is the kitchen that prepares it.
+
+JSON:
+  JavaScript Object Notation — a lightweight text format for sending data
+  between systems. It looks like this:
+    { "name": "Alice", "age": 25, "posts": 3 }
+  Both JavaScript and Python can read and write JSON easily.
+
+PROXY:
+  During development, React runs on port 5173 and Flask runs on port 5000.
+  Browsers block requests between different ports (called CORS — Cross-Origin
+  Resource Sharing). A proxy is a middleman: when React needs data from Flask,
+  it sends the request to itself (port 5173), and Vite quietly forwards it to
+  Flask (port 5000). The browser never knows two servers are involved.
+
+APP FACTORY PATTERN:
+  A Flask pattern where you create the app inside a function called
+  create_app() instead of as a global variable. Benefits:
+  - You can create multiple app instances (useful for testing).
+  - Configuration is loaded inside the function, making it flexible.
+  - Extensions (like the database) are initialized cleanly.
+
+BLUEPRINT:
+  A Flask Blueprint is a way to organize routes (endpoints) into groups.
+  Instead of putting all routes in one big file, you create separate
+  blueprints for auth routes, post routes, health routes, etc. Each
+  blueprint is registered with the main app.
+
+ENVIRONMENT VARIABLES:
+  Sensitive information (database passwords, secret keys) should never be
+  written directly in code. Instead, they are stored in a .env file and
+  loaded at runtime. The .env file is listed in .gitignore so it is never
+  committed to version control.
+
+4. TECHNOLOGY EXPLANATION
+-------------------------
+
+REACT (Frontend Framework):
+  A JavaScript library for building user interfaces. You write components
+  (reusable pieces of UI) and React efficiently updates the browser when
+  data changes. We chose React because it is the most widely used frontend
+  framework, has excellent documentation, and is commonly asked about in
+  interviews.
+
+VITE (Build Tool):
+  Vite is the tool that runs our React development server. It provides:
+  - Hot Module Replacement (HMR): when you save a file, the browser updates
+    instantly without a full page reload.
+  - Fast startup: Vite uses native ES modules, making it much faster than
+    older tools like Webpack.
+  - Build command: when we are ready for production, Vite bundles everything
+    into optimized static files.
+
+TAILWIND CSS (Styling):
+  A utility-first CSS framework. Instead of writing CSS classes like
+  .button-primary { background: blue; padding: 10px; }, you write utility
+  classes directly in your HTML: <button className="bg-blue-500 p-2.5">.
+  This keeps styling close to the markup and eliminates the need for
+  separate CSS files for every component.
+
+REACT ROUTER (Navigation):
+  Handles client-side routing. When a user clicks a link to /profile, React
+  Router swaps the page content without reloading the browser. It reads the
+  URL and renders the matching component.
+
+AXIOS (HTTP Client):
+  A JavaScript library for making HTTP requests. We use it to call our
+  Flask API. We chose Axios over the built-in fetch() because:
+  - Automatic JSON parsing.
+  - Easy to configure with base URLs and default headers.
+  - Built-in request/response interceptors (useful for auth later).
+
+LUCIDE REACT (Icons):
+  A lightweight icon library. Provides clean, customizable SVG icons as
+  React components. Example: <CheckCircle className="w-5 h-5" />.
+
+FLASK (Backend Framework):
+  A lightweight Python web framework. It gives you the basics (routing,
+  request handling, responses) without forcing a specific project structure.
+  We chose Flask because:
+  - It is beginner-friendly and easy to understand.
+  - It is flexible — you structure the project how you want.
+  - It is widely used in the industry and commonly asked about in interviews.
+
+PYTHON-DOTENV:
+  A small library that loads variables from a .env file into the
+  environment. This means you can access secrets using os.getenv() without
+  hardcoding them.
+
+5. FILE-BY-FILE EXPLANATION
+---------------------------
+
+CLIENT (FRONTEND):
+  client/index.html
+    The single HTML page that React mounts into. Contains a <div id="root">
+    where the entire React app renders. The <script> tag loads main.jsx.
+
+  client/vite.config.js
+    Configuration for Vite. Sets up:
+    - The React plugin (enables JSX support).
+    - The Tailwind CSS plugin.
+    - The proxy: forwards /api/* requests to Flask on port 5000.
+
+  client/src/main.jsx
+    The entry point. This file mounts the React app into the #root div.
+    It wraps the app in StrictMode, which helps catch common bugs during
+    development by running components twice.
+
+  client/src/index.css
+    Global styles. Imports Tailwind CSS, loads Google Fonts (Playfair
+    Display, DM Sans, Lora), and defines our custom design tokens
+    (colors and font families) using Tailwind v4's @theme directive.
+
+  client/src/App.jsx
+    The root component. Sets up React Router with a BrowserRouter and
+    defines the route mapping: the "/" path renders the Home page.
+
+  client/src/pages/Home.jsx
+    The landing page. Shows the app name, tagline, and a health check
+    indicator. Uses useEffect to call the /api/health endpoint when the
+    page loads and displays the connection status.
+
+  client/src/services/api.js
+    Creates a pre-configured Axios instance. Sets the base URL to /api
+    so all API calls use relative paths. This instance will later be
+    extended with auth headers.
+
+SERVER (BACKEND):
+  server/run.py
+    The entry point for the Flask server. Calls create_app() and runs the
+    development server on port 5000 with debug mode enabled.
+
+  server/app/__init__.py
+    The app factory. Creates the Flask app, loads configuration, initializes
+    SQLAlchemy and Flask-Migrate, and registers route blueprints.
+
+  server/app/config.py
+    Configuration class. Reads SECRET_KEY and DATABASE_URL from environment
+    variables. Disables SQLAlchemy's event tracking system (not needed and
+    wastes memory).
+
+  server/app/routes/health.py
+    A simple Blueprint with one endpoint: GET /api/health. Returns a JSON
+    response with status "ok". Used to verify the backend is running.
+
+  server/.env
+    Contains secret configuration values. Never committed to Git.
+
+  server/.env.example
+    A template showing what environment variables are needed, with
+    placeholder values. Committed to Git so other developers know what
+    to configure.
+
+  server/requirements.txt
+    Lists all Python packages the backend needs. Running
+    pip install -r requirements.txt installs them all.
+
+PROJECT ROOT:
+  .gitignore
+    Tells Git which files to ignore: node_modules, __pycache__, .env,
+    IDE config files, and OS-specific files.
+
+  README.md
+    Project overview with quick-start instructions.
+
+6. CODE EXPLANATION
+-------------------
+
+--- client/src/pages/Home.jsx ---
+
+  const [status, setStatus] = useState('loading')
+
+    useState is a React Hook that creates a piece of state. Here, "status"
+    starts as 'loading' and can be changed using setStatus(). When status
+    changes, React re-renders the component to show the new value.
+
+  useEffect(() => {
+    api.get('/health')
+      .then(() => setStatus('connected'))
+      .catch(() => setStatus('error'))
+  }, [])
+
+    useEffect is a React Hook that runs side effects (things that happen
+    outside of rendering, like API calls). The empty array [] means "run
+    this only once when the component first appears." Inside:
+    - api.get('/health') sends a GET request to /api/health.
+    - .then() runs if the request succeeds — sets status to 'connected'.
+    - .catch() runs if the request fails — sets status to 'error'.
+
+--- client/src/services/api.js ---
+
+  const api = axios.create({
+    baseURL: '/api',
+    headers: { 'Content-Type': 'application/json' },
+  })
+
+    Creates a reusable Axios instance. baseURL means every request starts
+    with /api, so api.get('/health') actually requests /api/health. The
+    Content-Type header tells the server we are sending JSON data.
+
+--- server/app/__init__.py ---
+
+  db = SQLAlchemy()
+  migrate = Migrate()
+
+    Creates extension objects outside the factory function. This allows
+    other files (like models) to import db without importing the app.
+    They are initialized with the actual app inside create_app().
+
+  def create_app():
+    app = Flask(__name__)
+    app.config.from_object(Config)
+    db.init_app(app)
+    migrate.init_app(app, db)
+    from app.routes.health import health_bp
+    app.register_blueprint(health_bp)
+    return app
+
+    The factory:
+    1. Creates a Flask instance.
+    2. Loads config from the Config class.
+    3. Connects SQLAlchemy and Migrate to this app.
+    4. Registers the health Blueprint (imports inside the function to
+       avoid circular import issues).
+    5. Returns the configured app.
+
+--- server/app/routes/health.py ---
+
+  @health_bp.route('/api/health', methods=['GET'])
+  def health_check():
+    return jsonify({ 'status': 'ok', 'message': 'midnight. API is running' })
+
+    The @route decorator tells Flask: "when someone sends a GET request to
+    /api/health, run this function." jsonify() converts a Python dictionary
+    into a JSON response with the correct Content-Type header.
+
+--- client/vite.config.js (proxy section) ---
+
+  proxy: {
+    '/api': {
+      target: 'http://localhost:5000',
+      changeOrigin: true,
+    },
+  }
+
+    Tells Vite: "any request whose URL starts with /api should be forwarded
+    to http://localhost:5000." changeOrigin modifies the request's Host
+    header to match the target, preventing potential issues.
+
+7. APPLICATION WORKFLOW
+-----------------------
+Here is how data travels through the application in this milestone:
+
+  1. User opens http://localhost:5173 in their browser.
+  2. Vite serves the index.html file, which loads main.jsx.
+  3. React mounts the App component, which renders the Home page.
+  4. Home's useEffect fires and calls api.get('/health').
+  5. Axios sends GET /api/health to localhost:5173 (Vite).
+  6. Vite's proxy forwards the request to localhost:5000 (Flask).
+  7. Flask matches the URL to the health_check() function.
+  8. health_check() returns JSON: { status: "ok", message: "..." }.
+  9. The response travels back: Flask → Vite proxy → Axios.
+  10. The .then() callback runs, setting status to 'connected'.
+  11. React re-renders Home, showing the green checkmark and
+      "Connected to Flask ✓".
+
+8. COMMANDS EXECUTED
+--------------------
+
+  npm create vite@latest client -- --template react
+    Creates a new React project in the client/ folder using Vite's
+    official React template. The -- separates npm arguments from Vite
+    arguments. --template react tells Vite to scaffold a React project.
+
+  cd client && npm install
+    Installs the base dependencies listed in package.json (react,
+    react-dom, vite, etc.) into the node_modules/ folder.
+
+  npm install react-router-dom axios lucide-react
+    Installs our additional runtime dependencies:
+    - react-router-dom: client-side routing.
+    - axios: HTTP client for API calls.
+    - lucide-react: icon components.
+
+  npm install -D tailwindcss @tailwindcss/vite
+    Installs Tailwind CSS and its Vite plugin as dev dependencies (-D).
+    Dev dependencies are only needed during development, not in production.
+
+  pip install -r requirements.txt
+    Reads server/requirements.txt and installs every listed Python
+    package: Flask, Flask-SQLAlchemy, Flask-Migrate, psycopg2-binary,
+    python-dotenv, and PyJWT.
+
+  python run.py
+    Starts the Flask development server on port 5000 with debug mode
+    (auto-reload on file changes).
+
+  npm run dev
+    Starts the Vite development server on port 5173 with hot module
+    replacement.
+
+9. TESTING
+----------
+
+HOW TO TEST:
+  1. Open a terminal, navigate to server/, run: python run.py
+     Expected: "Running on http://127.0.0.1:5000"
+
+  2. Open another terminal, navigate to client/, run: npm run dev
+     Expected: "VITE ready" and a local URL.
+
+  3. Open http://localhost:5173 in your browser.
+     Expected: You see "midnight." in large text, a tagline, and a
+     green checkmark saying "Connected to Flask ✓".
+
+  4. Stop the Flask server (Ctrl+C in the server terminal).
+     Refresh the browser page.
+     Expected: Red X icon saying "Cannot reach server — is Flask running?"
+
+  5. Test the API directly by opening http://localhost:5000/api/health
+     in your browser.
+     Expected: JSON response: {"message":"midnight. API is running","status":"ok"}
+
+EDGE CASES CHECKED:
+  - Frontend loads correctly even when backend is down (shows error state).
+  - Proxy correctly forwards /api/* from port 5173 to port 5000.
+  - Custom fonts and colors render correctly.
+
+10. COMMON MISTAKES
+--------------------
+
+  MISTAKE: Running npm install in the root folder instead of client/.
+  CAUSE: The root folder has no package.json. npm commands must run in
+  the directory that contains the relevant package.json.
+  FIX: Always cd client before running npm commands.
+
+  MISTAKE: "Module not found" errors when importing files.
+  CAUSE: Wrong file path or missing file extension in the import.
+  FIX: Check the import path carefully. React imports don't need .jsx
+  extensions by default in Vite, but the file must exist at that path.
+
+  MISTAKE: CORS errors when React tries to call Flask.
+  CAUSE: The Vite proxy is not configured, or the proxy config has a typo.
+  FIX: Check vite.config.js — the proxy key must match the URL prefix
+  your API calls use ('/api').
+
+  MISTAKE: Flask says "address already in use" when starting.
+  CAUSE: Another process is using port 5000. On macOS, AirPlay sometimes
+  uses port 5000.
+  FIX: Stop the other process, or change the port in run.py.
+
+  MISTAKE: .env file not loading — config values are None.
+  CAUSE: python-dotenv not installed, or .env file is in the wrong folder.
+  FIX: Ensure .env is in server/ (same folder as run.py) and that
+  python-dotenv is installed (pip install python-dotenv).
+
+  MISTAKE: Tailwind classes not working (no styling applied).
+  CAUSE: Tailwind CSS not imported in index.css, or the Vite plugin is
+  missing from vite.config.js.
+  FIX: Ensure index.css starts with @import "tailwindcss"; and that
+  tailwindcss() is listed in the plugins array of vite.config.js.
+
+11. INTERVIEW PREPARATION
+--------------------------
+
+  Q1: What is a Single Page Application (SPA)?
+  A: An SPA loads one HTML page and uses JavaScript to dynamically update
+  the content without full page reloads. React, Vue, and Angular all build
+  SPAs. Benefits include faster navigation, smoother user experience, and
+  reduced server load since only data (not full pages) is transferred.
+
+  Q2: What is a REST API and how does it work?
+  A: REST is an architectural style for building APIs. It uses HTTP methods
+  (GET, POST, PUT, DELETE) on resource URLs. For example, GET /api/posts
+  retrieves posts, POST /api/posts creates a new post. Responses are
+  typically JSON. REST is stateless — each request contains all the
+  information the server needs.
+
+  Q3: What is the Flask app factory pattern and why is it used?
+  A: The app factory is a function (create_app()) that creates and
+  configures the Flask application. It is used because:
+  1) It allows creating multiple app instances (useful for testing).
+  2) Extensions are initialized with a specific app, not globally.
+  3) Configuration can differ between environments (dev, test, prod).
+
+  Q4: What is a proxy in web development?
+  A: A proxy is a server that sits between the client and another server,
+  forwarding requests on the client's behalf. In development, the Vite
+  proxy forwards /api/* requests from the frontend server (port 5173) to
+  the backend server (port 5000). This avoids CORS issues because the
+  browser thinks all requests go to the same origin.
+
+  Q5: What is the difference between useState and useEffect in React?
+  A: useState creates a piece of reactive state — a value that, when
+  changed, causes the component to re-render. useEffect runs side effects
+  (API calls, subscriptions, timers) after the component renders. useState
+  manages data; useEffect manages actions that happen in response to
+  rendering.
+
+  Q6: What is CORS and why does it exist?
+  A: Cross-Origin Resource Sharing is a browser security feature that
+  blocks web pages from making requests to a different domain/port than
+  the one that served the page. It exists to prevent malicious websites
+  from stealing data by making unauthorized API calls. In development,
+  we bypass it with a proxy; in production, we either serve frontend and
+  backend from the same domain or configure CORS headers on the backend.
+
+  Q7: Why do we use environment variables for configuration?
+  A: Environment variables keep sensitive data (database passwords, API
+  keys, secret keys) out of the source code. This means:
+  1) Secrets are never committed to version control.
+  2) Different environments (dev, staging, prod) can use different values
+     without changing code.
+  3) Deployment platforms (Heroku, AWS) set env vars through their UI.
+
+12. KEY TAKEAWAYS
+-----------------
+
+  1. The project has two independent halves: client (React) and server
+     (Flask). Each has its own dependencies, its own server, and its own
+     terminal.
+
+  2. React talks to Flask through HTTP requests (using Axios) to API
+     endpoints. They communicate via JSON data.
+
+  3. During development, Vite's proxy forwards /api/* requests to Flask,
+     avoiding CORS issues.
+
+  4. Flask uses the app factory pattern (create_app()) for clean
+     configuration and testability.
+
+  5. Tailwind CSS is configured with custom colors and fonts that match
+     our design system — use class names like bg-background, text-accent,
+     font-heading throughout the app.
+
+  6. Secrets go in .env, never in code. The .env file is gitignored.
+
+  7. The health check endpoint (/api/health) is a common pattern in
+     production apps for monitoring — load balancers and deployment
+     platforms use it to check if the server is alive.
+
+================================================================================
+END OF MILESTONE 01
+================================================================================
+

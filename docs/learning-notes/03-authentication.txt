@@ -1,0 +1,361 @@
+================================================================================
+MILESTONE 03: AUTHENTICATION (TRADITIONAL + GOOGLE OAUTH 2.0 / OIDC)
+================================================================================
+
+1. MILESTONE OBJECTIVE
+----------------------
+In Milestone 2, we established the PostgreSQL relational database schema for
+`users` and `posts`. In this milestone, we implement a full-featured, secure,
+dual-mode authentication engine:
+
+1. Traditional Registration & Login using email, pen name/username, and salted
+   password hashes via `werkzeug.security`.
+2. Modern "Continue with Google" sign-in leveraging Google Identity Services
+   (OAuth 2.0 & OpenID Connect).
+3. Independent Backend Verification: Flask never trusts identity information
+   sent directly from the browser; instead, it cryptographically verifies Google's
+   signed JWT ID tokens using Google's public RSA certificates.
+4. Account Linking & Security: Safe email verification checks preventing account
+   takeover attacks.
+5. Unified Session Engine: Issues application-level HMAC-SHA256 JSON Web Tokens
+   (JWT) regardless of the authentication method.
+6. Frontend Experience: Elegant dark-mode UI with Google Sign-In buttons, form
+   validation, and reactive authentication state via React Context and Axios
+   interceptors.
+
+2. OAUTH 2.0 AND OPENID CONNECT (OIDC) EXPLAINED SIMPLY
+-------------------------------------------------------
+WHAT IS OAUTH 2.0?
+  OAuth 2.0 is an authorization framework. It allows a third party (like Google)
+  to grant an application limited access to a user's resources without ever
+  sharing their password.
+  Analogy: A hotel valet key. It allows the valet to park the car, but cannot
+  unlock the glovebox or trunk.
+
+WHAT IS OPENID CONNECT (OIDC)?
+  OAuth 2.0 by itself only answers: "What is this app authorized to access?"
+  OpenID Connect is an identity layer built on top of OAuth 2.0 that answers:
+  "Who is the current user?"
+  OIDC introduces an ID Token: a signed JSON Web Token (JWT) containing profile
+  attributes called "claims" (email, name, picture, unique ID).
+
+WHY WE DO NOT SEND PASSWORD TO GOOGLE:
+  The user enters their Google password strictly inside Google's secure iframe /
+  dialog on `accounts.google.com`. Our website never touches or sees their Google
+  password.
+
+3. DIFFERENCE BETWEEN OAUTH AND JWT
+-----------------------------------
+A frequent source of confusion:
+- OAuth 2.0 is a PROTOCOL: A multi-step agreement and workflow governing how
+  clients, users, and authorization servers talk to each other.
+- JWT (JSON Web Token) is a DATA FORMAT: A compact, URL-safe, digitally signed
+  string consisting of three dot-separated Base64 parts (`Header.Payload.Signature`).
+
+In our architecture:
+1. Google uses OIDC to issue a Google ID Token (which happens to be a JWT signed
+   by Google).
+2. Midnight backend verifies Google's JWT.
+3. Once verified, Midnight issues its OWN application JWT signed with our
+   `SECRET_KEY` (`HS256`). The React frontend uses Midnight's JWT for all
+   subsequent API calls.
+
+4. GOOGLE SIGN-IN APPLICATION WORKFLOW
+--------------------------------------
+The complete flow from browser to database:
+
+  1. User clicks "Continue with Google" on `localhost:5173`.
+  2. Google Identity Services (GIS) library opens a secure Google prompt.
+  3. User authenticates with Google and grants consent.
+  4. Google's auth servers return an ID Token (JWT) directly to the browser.
+  5. React intercepts this and sends it to our backend:
+     `POST /api/auth/google` with `{ credential: "<google_id_token>" }`.
+  6. Flask receives the token and hands it to `google.oauth2.id_token.verify_oauth2_token`.
+  7. Google Auth library:
+     - Downloads Google's rotating public JSON Web Key Sets (JWKS).
+     - Verifies the cryptographic signature of the token.
+     - Confirms `aud` (audience) matches our `GOOGLE_CLIENT_ID`.
+     - Confirms `iss` (issuer) is `accounts.google.com` or `https://accounts.google.com`.
+     - Confirms the token has not expired (`exp`).
+  8. Flask extracts the verified claims: `sub` (stable unique ID), `email`,
+     `name`, `picture`, `email_verified`.
+  9. Database Logic:
+     - Looks up user by `google_id == sub`. If found -> User logs in.
+     - If not found by `google_id`, checks by `email`. If existing email is
+       verified, safely links the Google ID. If unverified, rejects linking.
+     - If completely new, creates a `User` record with `auth_provider='google'`
+       and `password_hash=None`.
+  10. Flask generates a Midnight JWT (`HS256`, 7-day expiry) containing `sub: user.id`.
+  11. Frontend stores this token in `localStorage` (`midnight_token`).
+  12. Axios attaches `Authorization: Bearer <token>` to all subsequent requests.
+
+5. ID TOKEN VERIFICATION & SECURITY DEEP DIVE
+---------------------------------------------
+NEVER TRUST THE FRONTEND:
+  A naive developer might decode the Google token in React, read `email: "admin@corp.com"`,
+  and send `{ email: "admin@corp.com" }` to the backend. An attacker could simply
+  send anyone's email to `/api/auth/google` and take over their account!
+
+OUR IMPLEMENTATION:
+  We send the raw Google ID Token string to Flask. Flask verifies the signature
+  using Google's public keys. An attacker cannot forge Google's cryptographic
+  signature without Google's private key.
+
+AUDIENCE (`aud`) CHECK:
+  Google issues tokens to many applications. The `aud` claim guarantees that this
+  token was issued specifically for OUR application (`534233490069-...apps.googleusercontent.com`).
+  If an attacker signs in on a malicious app and gets a token, they cannot replay
+  that token against Midnight because the audience will not match.
+
+6. ACCOUNT CREATION AND LINKING SECURITY
+----------------------------------------
+Account linking occurs when a user registers with email/password, and later
+clicks "Continue with Google" using the same email address.
+
+THE VULNERABILITY (Pre-account takeover):
+  Suppose Alice has not signed up yet. Attacker registers `alice@gmail.com` on
+  Midnight with password `attacker123`. The email is unverified.
+  Later, Alice visits Midnight and clicks "Continue with Google". If the system
+  blindly linked Google to the existing account, the attacker could still log in
+  with `attacker123` and spy on Alice!
+
+OUR SAFE POLICY:
+  - If Google confirms `email_verified == True`, we only link if the existing
+    account email is also verified or if the user explicitly confirms ownership.
+  - If an account exists with an unverified email and Google email is not verified,
+    linking is rejected.
+  - Accounts registered with Google have `password_hash = None`. If someone tries
+    to log in via the password form, the server informs them: "This account was
+    created with Google Sign-In. Please sign in with Google."
+
+7. DATABASE CHANGES
+-------------------
+We extended the `users` table without dropping any data using Flask-Migrate:
+
+Migration ID: `288916f4e08b_add_google_oauth_fields_and_nullable_password_to_users`
+
+Columns updated:
+- `password_hash`: Changed from `nullable=False` to `nullable=True` (allowing
+  Google accounts without a local password).
+- `google_id`: `VARCHAR(100)`, `UNIQUE`, `NULLABLE`, `INDEXED`. Stores Google's
+  `sub` claim.
+- `auth_provider`: `VARCHAR(20)`, `NOT NULL`, default `'local'`. Values: `'local'` | `'google'`.
+- `avatar_url`: `VARCHAR(255)`, `NULLABLE`. Stores Google profile photo URL.
+- `email_verified`: `BOOLEAN`, `NOT NULL`, default `False`.
+
+8. FILE-BY-FILE EXPLANATION
+---------------------------
+server/app/models/user.py
+  - Added OAuth columns (`google_id`, `auth_provider`, `avatar_url`, `email_verified`).
+  - Added `to_dict()` helper to safely serialize user data for responses,
+    strictly omitting `password_hash`.
+
+server/app/utils/token_util.py
+  - `generate_jwt_token(user_id)`: Generates a 7-day HMAC-SHA256 JWT with string `sub`.
+  - `decode_jwt_token(token_str)`: Decodes and verifies token signature and expiration.
+
+server/app/utils/auth_middleware.py
+  - `@token_required`: Decorator that inspects `Authorization: Bearer <token>`,
+    authenticates the user, and attaches them to Flask `g.current_user`.
+
+server/app/services/auth_service.py
+  - `register_user(username, email, password)`: Validates inputs, checks uniqueness,
+    hashes password with `generate_password_hash`, saves to DB.
+  - `login_user(email_or_username, password)`: Validates password hash against input.
+  - `authenticate_google_user(credential_id_token)`: Verifies token with `google-auth`,
+    performs account linking, creates records, returns Midnight JWT.
+
+server/app/routes/auth.py
+  - `POST /api/auth/register`: Traditional signup.
+  - `POST /api/auth/login`: Traditional signin.
+  - `POST /api/auth/google`: Google OAuth exchange.
+  - `GET /api/auth/me`: Authenticated user identity route.
+
+client/src/services/api.js
+  - Added Axios request interceptor that dynamically injects `Authorization: Bearer <token>`
+    from `localStorage`.
+
+client/src/services/auth.js
+  - API call wrappers for `/auth/register`, `/auth/login`, `/auth/google`, and `/auth/me`.
+
+client/src/context/AuthContext.jsx
+  - React Context providing `user`, `isAuthenticated`, `loginWithCredentials`,
+    `registerWithCredentials`, `loginWithGoogle`, and `logout`.
+  - Checks `localStorage` on initial app load to restore logged-in sessions.
+
+client/src/components/Navbar.jsx
+  - Shows Midnight logo, user avatar, pen name, Google provider badge, and Log Out button.
+
+client/src/pages/Login.jsx & client/src/pages/Register.jsx
+  - Elegant dark UI with Continue with Google button (`@react-oauth/google`) and
+    email/password forms with error messaging and loading spinners.
+
+9. CODE EXPLANATION
+-------------------
+--- Google ID Token Verification (server/app/services/auth_service.py) ---
+  id_info = id_token.verify_oauth2_token(
+      credential_id_token,
+      google_requests.Request(),
+      google_client_id
+  )
+  - `google_requests.Request()`: An HTTP transport that fetches Google's public keys.
+  - `google_client_id`: Validates that the token was minted specifically for our client ID.
+  - Raises `ValueError` if the signature is forged, the token is expired, or the audience differs.
+
+--- Password Hashing (server/app/services/auth_service.py) ---
+  hashed_password = generate_password_hash(password)
+  check_password_hash(user.password_hash, password)
+  - Uses PBKDF2/scrypt with a secure random salt. Plaintext passwords are never stored.
+
+--- JWT Generation (server/app/utils/token_util.py) ---
+  payload = {
+      'sub': str(user_id),
+      'iat': datetime.now(timezone.utc),
+      'exp': datetime.now(timezone.utc) + timedelta(days=7)
+  }
+  token = jwt.encode(payload, secret_key, algorithm='HS256')
+  - Standard claims: `sub` (subject identifier), `iat` (issued at), `exp` (expiration).
+
+10. COMMANDS EXECUTED
+---------------------
+  pip install google-auth requests
+    Installs Google's official token verification library and HTTP transport.
+
+  cd client && npm install @react-oauth/google
+    Installs the Google Identity Services React SDK for the "Continue with Google" button.
+
+  flask db migrate -m "add google oauth fields and nullable password to users"
+    Generates Alembic migration script for the new columns on `users`.
+
+  flask db upgrade
+    Applies the migration to the PostgreSQL database `midnight_db`.
+
+  cd client && npm run build
+    Verifies that the entire React application compiles for production with zero errors.
+
+11. TESTING INSTRUCTIONS AND EXPECTED RESULTS
+---------------------------------------------
+TEST 1: Automated Backend Test Suite
+  Command:
+    cd server && python -c "<test_suite>"
+  Results Verified:
+    - User registration creates hashed password and returns JWT.
+    - Duplicate username/email correctly returns HTTP 400.
+    - Login with valid credentials returns HTTP 200 and JWT.
+    - Login with invalid password returns HTTP 401.
+    - Protected route `/api/auth/me` with Bearer token returns HTTP 200 and user object.
+    - Tampered or fake Google credential returns HTTP 401 ("Invalid Google ID token").
+
+TEST 2: End-to-End Browser Test
+  1. Terminal 1: `cd server` -> `python run.py`
+  2. Terminal 2: `cd client` -> `npm run dev`
+  3. Open `http://localhost:5173/login` in your browser.
+  4. Click "Continue with Google":
+     - Google OAuth popup opens displaying your Google Client ID and consent screen.
+     - Selecting your Google account authenticates, securely posts the token to Flask,
+       and redirects to the Home page displaying your Google avatar, name, and "Google" badge.
+  5. Test traditional sign-up:
+     - Log out, go to `/register`, create an account with pen name, email, and password.
+     - Confirmed account creation and automatic login.
+
+12. COMMON ERRORS AND DEBUGGING
+-------------------------------
+ERROR: `[GSI_LOGGER]: The given origin is not allowed for the given client ID.`
+  CAUSE: `http://localhost:5173` is not added under "Authorized JavaScript origins"
+  in Google Cloud Console -> Credentials -> OAuth client ID.
+  FIX: Add both `http://localhost:5173` and `http://127.0.0.1:5173` to Authorized Origins.
+
+ERROR: `Invalid Google ID token: Token used too early, ... Check that your computer's clock is set correctly.`
+  CAUSE: System clock drift between the local machine and Google's atomic time servers.
+  Google ID tokens have an `iat` (Issued At) claim in UTC. If the local machine clock is
+  behind, Google's validator detects the token as arriving from the "future".
+  FIX:
+  1) Configure `clock_skew_in_seconds` parameter in `id_token.verify_oauth2_token()`
+     to provide a tolerance window for local clock drift.
+  2) Synchronize Windows internet time: Windows Settings -> Time & Language -> Date & Time -> "Sync now".
+
+ERROR: `Subject must be a string` in PyJWT
+  CAUSE: PyJWT 2.x requires the `sub` claim to be a string type.
+  FIX: Cast `str(user_id)` when generating JWTs, and `int(sub)` when decoding.
+
+ERROR: `401 Unauthorized: Invalid Authorization format`
+  CAUSE: Missing `Bearer ` prefix in request header.
+  FIX: Ensure Axios interceptor formats header as `Bearer ${token}`.
+
+13. INTERVIEW PREPARATION (10 QUESTIONS & ANSWERS)
+--------------------------------------------------
+Q1: Explain the fundamental difference between Authentication (AuthN) and Authorization (AuthZ).
+A: Authentication verifies WHO you are (e.g. logging in with Google or a password).
+Authorization determines WHAT you are allowed to do (e.g. can user #2 edit user #1's blog post?).
+
+Q2: Why should a backend independently verify a third-party OAuth token instead of trusting user info sent by the frontend?
+A: Frontend code runs in the user's browser, an untrusted environment. A malicious user
+can easily open developer tools and modify network requests, sending any arbitrary email
+or user ID. By verifying Google's cryptographic signature on the backend using Google's
+public keys, the server mathematically guarantees that Google issued the token and that
+the user's email was not altered.
+
+Q3: What are the three parts of a JSON Web Token (JWT)?
+A:
+1. Header: Specifies the token type (JWT) and signing algorithm (e.g. HS256, RS256).
+2. Payload: Contains the claims (e.g. `sub`, `exp`, `iat`, custom user data).
+3. Signature: Created by taking the base64-encoded header and payload, hashing them
+   with a secret or private key using the specified algorithm.
+
+Q4: What is the difference between symmetric (e.g. HS256) and asymmetric (e.g. RS256) token signing?
+A:
+- Symmetric (HS256): Uses a single shared secret key for both creating and verifying
+  the signature. Both the issuer and verifier must know the secret.
+- Asymmetric (RS256): Uses a public/private key pair. The issuer signs with a private
+  key; any verifier can verify using the corresponding public key without ever
+  knowing the private key. Google uses RS256; our internal API uses HS256.
+
+Q5: What is the purpose of the `sub` (subject) claim in an ID token?
+A: The `sub` claim is a unique, persistent identifier for the user provided by the
+identity provider (e.g., Google). Unlike an email address or username—which a user
+might change—the `sub` value never changes for that user's account, making it the most
+reliable primary key for external identity mapping.
+
+Q6: What is a "pre-account takeover" vulnerability in OAuth account linking?
+A: If an attacker creates an unverified account using a victim's email before the victim
+signs up, and the application later automatically links an OAuth login to that existing
+account without verifying email ownership, the attacker retains access via their password.
+Preventing this requires checking that the local account's email is verified before linking.
+
+Q7: Why do we hash passwords with salt and slow hash algorithms instead of SHA-256?
+A: SHA-256 is designed to be fast, making it susceptible to brute-force and rainbow table
+attacks (billions of hashes per second on modern GPUs). Password hashing functions like
+bcrypt, Argon2, or PBKDF2 (used in Werkzeug) are intentionally computationally expensive
+and include a unique random salt per user, neutralizing precomputed rainbow tables.
+
+Q8: What is the purpose of the `aud` (audience) claim in an OAuth ID token?
+A: The audience claim specifies the client ID for which the token was intended.
+Without verifying `aud`, an attacker could obtain a valid ID token from their own
+malicious app and replay it against our app, impersonating a user.
+
+Q9: What are the trade-offs of storing JWTs in `localStorage` vs. `httpOnly` cookies?
+A:
+- `localStorage`: Easy to access from JavaScript, immune to Cross-Site Request Forgery
+  (CSRF), but vulnerable to Cross-Site Scripting (XSS) if untrusted scripts run.
+- `httpOnly` cookies: Inaccessible to JavaScript (protecting against XSS token theft),
+  but vulnerable to CSRF, requiring anti-CSRF tokens (SameSite cookies mitigate this).
+
+Q10: What is the purpose of an Axios interceptor in authentication?
+A: An interceptor acts as middleware for outgoing HTTP requests or incoming responses.
+A request interceptor automatically attaches the current `Authorization: Bearer <token>`
+header to every API call without having to manually pass headers in every single component.
+
+14. KEY TAKEAWAYS
+-----------------
+1. Midnight supports both traditional and Google OAuth 2.0 authentication smoothly.
+2. The backend cryptographically validates Google ID tokens against Google public certs
+   and verifies audience and issuer.
+3. Users registered via Google have `password_hash = None` and a recorded `google_id`.
+4. Our database schema was updated safely via Flask-Migrate with zero data loss.
+5. React Context and Axios interceptors provide a seamless, persistent session across
+   page refreshes.
+
+================================================================================
+END OF MILESTONE 03
+================================================================================
+

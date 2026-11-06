@@ -1,0 +1,327 @@
+================================================================================
+MILESTONE 02: DATABASE SETUP
+================================================================================
+
+1. MILESTONE OBJECTIVE
+----------------------
+In Milestone 1, we built the foundation connecting React and Flask. However,
+any data stored in Python variables would vanish the second the server stopped.
+
+In this milestone, we give "midnight." permanent memory:
+- Connect Flask to a production-grade relational database: PostgreSQL.
+- Create a dedicated database named `midnight_db`.
+- Design data models using SQLAlchemy ORM for Users and Posts.
+- Establish a One-to-Many relationship (one author writes many posts).
+- Configure version-controlled database migrations with Flask-Migrate (Alembic).
+- Execute migrations to materialize schemas in PostgreSQL without raw SQL scripts.
+- Test insertion, relationship queries, cascading deletions, and cleanup.
+- Preserve existing Milestone 1 functionality (e.g. /api/health).
+
+2. DATABASE FUNDAMENTALS EXPLAINED SIMPLY
+-----------------------------------------
+WHAT IS A DATABASE?
+  A database is specialized software designed to store, retrieve, update, and
+  protect data reliably on disk.
+
+RELATIONAL DATABASE (RDBMS):
+  Data is structured into "tables" consisting of columns (fields) and rows
+  (records), resembling spreadsheets. What makes them "relational" is their
+  ability to mathematically connect (relate) data across tables using identifiers.
+
+TABLES, COLUMNS, AND ROWS:
+  - Table: Represents an entity (e.g. `users`, `posts`).
+  - Column: An attribute of that entity (e.g. `username`, `title`, `created_at`).
+    Each column enforces a data type (integer, text, timestamp).
+  - Row (or Record): A single instance of that entity (e.g. a specific user).
+
+ACID PROPERTIES:
+  Relational databases adhere to ACID guarantees:
+  - Atomicity: An operation is all-or-nothing. If a post insertion fails mid-way,
+    the transaction rolls back completely.
+  - Consistency: Enforces constraints (e.g. unique emails, foreign keys).
+  - Isolation: Concurrent transactions do not corrupt each other's data.
+  - Durability: Once a transaction commits, the data remains safe even if the
+    server crashes or loses power.
+
+3. POSTGRESQL EXPLANATION
+-------------------------
+WHAT IS POSTGRESQL?
+  PostgreSQL (often called Postgres) is an advanced, enterprise-grade,
+  open-source object-relational database.
+
+WHY NOT SQLITE FOR MIDNIGHT.?
+  SQLite is an in-process, single-file database. While useful for rapid prototypes,
+  it lacks:
+  - Native concurrency handling (it locks the entire file on writes).
+  - Production parity: SQLite behaves differently than production engines with
+    data types, datetime parsing, and constraints.
+  PostgreSQL handles concurrent connections, robust constraint validation, and
+  is an industry standard in real-world full-stack web applications.
+
+4. SQLALCHEMY ORM EXPLANATION
+-----------------------------
+WHAT IS AN ORM (OBJECT-RELATIONAL MAPPER)?
+  In raw SQL, querying a user looks like:
+    SELECT id, username, email FROM users WHERE username = 'alice';
+  Then you must manually parse tuples into Python data structures.
+
+  With an ORM like SQLAlchemy:
+    user = User.query.filter_by(username='alice').first()
+  SQLAlchemy translates Python class definitions and method calls into SQL queries,
+  executes them against PostgreSQL, and maps table rows into Python objects.
+
+BENEFITS OF SQLALCHEMY:
+  - Productive & Pythonic: Treat records as objects and properties (`user.username`).
+  - SQL Injection Prevention: Automatically parameterizes input values,
+    preventing malicious queries.
+  - Database Agnostic: Can generate dialect-specific SQL for PostgreSQL, MySQL,
+    or SQLite without rewriting business logic.
+
+5. PRIMARY KEYS AND FOREIGN KEYS
+--------------------------------
+PRIMARY KEY (PK):
+  - A unique identifier for every row in a table.
+  - Cannot be NULL.
+  - In our `users` and `posts` tables, `id` is an integer primary key that
+    auto-increments using PostgreSQL sequences (`SERIAL` / `nextval`).
+  - Example: User #1, User #2.
+
+FOREIGN KEY (FK):
+  - A column in one table pointing to the primary key of another table.
+  - In `posts`, the column `author_id` references `users.id`.
+  - Referential Integrity: PostgreSQL blocks inserting a post with an
+    `author_id` that does not exist in the `users` table.
+
+ON DELETE CASCADE:
+  - Defines what happens when a parent record is deleted.
+  - `ondelete='CASCADE'` on the foreign key ensures that if a user account is
+    deleted, all posts written by that user are automatically removed by the
+    database, preventing dangling orphaned records.
+
+6. ONE-TO-MANY RELATIONSHIPS
+----------------------------
+A fundamental relational pattern:
+  - One User can author Many Posts.
+  - Each Post belongs to exactly One User.
+
+HOW SQLALCHEMY REPRESENTS THIS:
+  In `User` model:
+    posts = db.relationship('Post', backref='author', lazy=True, cascade='all, delete-orphan')
+
+  In `Post` model:
+    author_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+
+  - `backref='author'`: Dynamically attaches an `.author` attribute to every `Post`
+    instance. If you have a post `p`, `p.author` returns the `User` object.
+  - `lazy=True`: Posts are loaded on demand when `user.posts` is accessed,
+    avoiding unnecessary joins on simple queries.
+  - `cascade='all, delete-orphan'`: Directs SQLAlchemy's session to clean up
+    child post records when a user is deleted from the session.
+
+7. FILE-BY-FILE EXPLANATION
+---------------------------
+server/.env
+  - Securely defines `DATABASE_URL` with format:
+    `postgresql://USER:YOUR_PASSWORD@localhost:5432/midnight_db`
+  - Kept in `.gitignore` so database passwords are never committed to Git.
+
+server/.env.example
+  - Template file committed to version control with placeholder credentials:
+    `postgresql://postgres:your_password@localhost:5432/midnight_db`
+
+server/app/__init__.py
+  - Updated app factory to import `app.models` during `create_app()`.
+  - Ensures SQLAlchemy models are discovered by Flask and Flask-Migrate.
+
+server/app/models/__init__.py
+  - Package entry point exporting `User` and `Post`.
+  - Allows clean imports: `from app.models import User, Post`.
+
+server/app/models/user.py
+  - Defines the `User` class mapping to table `users`.
+  - Columns: `id`, `username` (unique, indexed), `email` (unique, indexed),
+    `password_hash`, `created_at` (UTC timestamp).
+  - Defines the one-to-many relationship with `Post`.
+
+server/app/models/post.py
+  - Defines the `Post` class mapping to table `posts`.
+  - Columns: `id`, `title`, `content` (Text), `author_id` (Foreign Key to `users.id`),
+    `created_at`, `updated_at`.
+
+server/migrations/
+  - Generated directory created by `flask db init`.
+  - Contains Alembic configuration (`alembic.ini`, `env.py`) and migration
+    history in `versions/`.
+
+server/migrations/versions/05131187fa40_create_users_and_posts_tables.py
+  - The migration script generated by `flask db migrate`.
+  - Contains `upgrade()` (creates tables, indexes, constraints) and
+    `downgrade()` (drops tables to rollback).
+
+8. CODE EXPLANATION
+-------------------
+--- server/app/models/user.py ---
+  `username = db.Column(db.String(80), unique=True, nullable=False, index=True)`
+  - `String(80)`: VARCHAR(80) in PostgreSQL.
+  - `unique=True`: Enforces database-level constraint preventing duplicate handles.
+  - `nullable=False`: Field is required (cannot be NULL).
+  - `index=True`: Creates a B-Tree index for O(log N) lookup speed on username queries.
+
+  `created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)`
+  - Uses timezone-aware UTC datetime.
+  - Uses a callable lambda so the function runs when the record is created,
+    rather than when the server starts.
+
+--- server/app/models/post.py ---
+  `author_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)`
+  - `ForeignKey('users.id')`: Enforces that `author_id` must match a valid `id` in `users`.
+  - `ondelete='CASCADE'`: Database-level cascade.
+  - `index=True`: Indexes the foreign key for fast retrieval of a user's posts.
+
+  `updated_at = db.Column(..., onupdate=lambda: datetime.now(timezone.utc))`
+  - `onupdate`: Automatically updates timestamp whenever the post row changes.
+
+9. DATABASE CONNECTION WORKFLOW
+-------------------------------
+1. When `run.py` calls `create_app()`:
+   - `python-dotenv` loads `server/.env`.
+   - `Config.SQLALCHEMY_DATABASE_URI` reads `DATABASE_URL`.
+   - `db.init_app(app)` connects SQLAlchemy to the Flask app context.
+2. Under the hood, SQLAlchemy uses the `psycopg2-binary` driver to establish
+   a connection pool with PostgreSQL on port 5432.
+3. Every incoming HTTP request or database session borrows a connection from
+   the pool, executes statements within a transaction, and releases it back.
+
+10. MIGRATION COMMANDS AND THEIR PURPOSE
+----------------------------------------
+What is a migration?
+A migration is a version-controlled Python script describing changes to the
+database schema (creating tables, renaming columns, adding indexes).
+
+COMMAND 1: `flask db init`
+  - Runs once at project initialization.
+  - Creates the `server/migrations` folder and environment files.
+
+COMMAND 2: `flask db migrate -m "description"`
+  - Inspects your current SQLAlchemy models and compares them against the
+    actual schema currently in PostgreSQL.
+  - Generates a timestamped migration script in `migrations/versions/`.
+  - DOES NOT alter the database yet; only creates the instructions.
+
+COMMAND 3: `flask db upgrade`
+  - Executes the unapplied migration script(s) against PostgreSQL.
+  - Updates the `alembic_version` table in the database to record that this
+    migration has been applied.
+
+COMMAND 4: `flask db downgrade` (Reference)
+  - Reverts the most recent migration step by executing the `downgrade()`
+    function in the migration script.
+
+11. TESTING INSTRUCTIONS AND EXPECTED RESULTS
+---------------------------------------------
+STEP 1: Verify PostgreSQL Connection and Tables
+  Command:
+    psql -U postgres -h localhost -p 5432 -d midnight_db -c "\dt"
+  Expected Result:
+    List of tables shows: `alembic_version`, `users`, `posts`.
+
+STEP 2: Inspect Table Schema
+  Command:
+    psql -U postgres -h localhost -p 5432 -d midnight_db -c "\d users"
+    psql -U postgres -h localhost -p 5432 -d midnight_db -c "\d posts"
+  Expected Result:
+    - `users` has primary key `users_pkey` on `id` and unique indexes on `email` and `username`.
+    - `posts` has foreign key `posts_author_id_fkey` pointing to `users(id)` with `ON DELETE CASCADE`.
+
+STEP 3: Test Insert, Relationship, Cascade Delete, and Cleanup
+  Script executed in Flask context:
+    1. Created test User ('midnight_tester').
+    2. Created test Post ('Notes Under The Lamppost') referencing user via relationship.
+    3. Queried user and verified `user.posts` contained 1 item.
+    4. Deleted `user` and confirmed that both user and post were cascaded and removed.
+  Expected Result:
+    "Created user: id=1, username=midnight_tester"
+    "Created post: id=1, title=Notes Under The Lamppost, author_id=1"
+    "Relationship verified: User midnight_tester has 1 post..."
+    "Cleanup complete and verified. Zero test artifacts remaining."
+
+STEP 4: Verify Milestone 1 Health Check
+  Command:
+    Invoke-RestMethod -Uri http://localhost:5000/api/health
+  Expected Result:
+    {"message": "midnight. API is running", "status": "ok"}
+
+12. COMMON ERRORS AND DEBUGGING
+-------------------------------
+ERROR: `psql: error: connection to server at "localhost", port 5432 failed: FATAL: password authentication failed`
+  CAUSE: The password specified in `DATABASE_URL` or command does not match
+  what was set for user `postgres`.
+  DEBUG/FIX: Verify password in `server/.env`. Reset password using Windows Services
+  or pgAdmin if lost.
+
+ERROR: `Target database is not up to date`
+  CAUSE: Trying to generate migrations or run code when previous migration
+  heads are out of sync.
+  DEBUG/FIX: Run `flask db upgrade` to apply pending migrations.
+
+ERROR: `relation "users" does not exist`
+  CAUSE: Models were defined in Python but migrations were never run against
+  the database.
+  DEBUG/FIX: Run `flask db migrate` followed by `flask db upgrade`.
+
+ERROR: `ImportError: cannot import name 'models' from 'app'`
+  CAUSE: Models package is not exporting properly or circular imports exist.
+  DEBUG/FIX: Ensure `app/models/__init__.py` exposes classes cleanly without
+  importing `create_app`.
+
+13. INTERVIEW PREPARATION
+-------------------------
+Q1: What is the difference between a database migration and `db.create_all()`?
+A: `db.create_all()` simply generates tables from current models if they do not
+already exist. It cannot alter existing tables, drop columns, or manage schema
+history. Database migrations (via Alembic/Flask-Migrate) generate version-controlled
+scripts that safely transition schemas across environments (dev, staging, prod)
+and support rolling back changes without losing data.
+
+Q2: What is the purpose of an index in a database, and what are its trade-offs?
+A: An index (like B-Tree) is an auxiliary data structure that allows the database
+engine to find rows in O(log N) time instead of performing a full table scan O(N).
+Trade-off: Indexes speed up `SELECT` queries but consume additional disk space and
+slow down `INSERT`, `UPDATE`, and `DELETE` operations because the index must be
+updated on every write.
+
+Q3: What is the difference between `lazy='select'` (or `lazy=True`) and eager loading in SQLAlchemy?
+A: Lazy loading defers querying related items until the property is explicitly
+accessed in Python code (e.g., `user.posts`). Eager loading (`lazy='joined'` or
+`options(joinedload())`) fetches parent and child records in a single SQL query
+using a `JOIN`. Lazy loading is simple but can cause the N+1 query problem if used
+inside loops.
+
+Q4: What is the N+1 query problem and how do you resolve it?
+A: The N+1 problem occurs when an application executes 1 initial query to fetch N
+records (e.g. 50 users), and then executes N separate queries inside a loop to
+fetch related items for each record (e.g. posts for each of the 50 users), totaling
+N + 1 queries. It is solved by eager loading (e.g. `JOIN` or `subqueryload`), fetching
+all required data in 1 or 2 batched queries.
+
+Q5: Why store a `password_hash` instead of plaintext passwords?
+A: If the database is compromised, plaintext passwords give attackers immediate
+access to accounts across multiple services (credential stuffing). A cryptographic
+hash (such as Argon2, bcrypt, or PBKDF2 with salt) is a one-way transformation.
+The system can verify passwords by comparing hashes, but attackers cannot easily
+reverse the hash back to the original password.
+
+14. KEY TAKEAWAYS
+-----------------
+1. PostgreSQL 18 is active and running on port 5432 with dedicated database `midnight_db`.
+2. Database credentials are protected in `server/.env` and never tracked in Git.
+3. Models (`User`, `Post`) define table columns and relational constraints with
+   automatic cascading deletes.
+4. Schema evolution is managed via Flask-Migrate; table modifications must always
+   go through `flask db migrate` and `flask db upgrade`.
+5. Milestone 1 API integrity is intact and fully operational.
+
+================================================================================
+END OF MILESTONE 02
+================================================================================
+

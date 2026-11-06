@@ -1,0 +1,109 @@
+midnight. UI redesign — Milestone 4
+====================================
+
+Design decisions
+----------------
+The interface uses an editorial reading rhythm: warm paper, quiet rules, open
+space, serif writing, and restrained controls. The midnight. wordmark remains
+Arial as requested. The feed is the first reading surface, so published writing
+appears in full with its author and publication date. Posts are separated by a
+fine rule rather than a stack of dashboard cards. Clicking a title still opens
+the existing detail route. Messaging and search have honest explanatory
+placeholders because those features do not exist yet.
+
+Light and dark themes
+--------------------
+The light palette uses a soft ivory page, near-black warm ink, muted gray-brown
+secondary text, and a restrained taupe accent. Dark mode changes the page to
+charcoal and text to warm off-white. CSS custom properties hold the palette;
+Tailwind's color tokens and shared component styles refer to those properties.
+Controls, forms, borders, editors, and navigation inherit the same palette.
+The theme toggle is a button with an accessible name describing the next mode.
+
+Theme persistence
+-----------------
+The selected theme is stored under the midnight_theme localStorage key. The
+navigation toggle updates that value and the document's data-theme attribute.
+An early script in client/index.html reads the saved value before React paints,
+reducing a flash of the wrong palette on refresh. If storage is unavailable it
+falls back to light mode.
+
+Component layout and responsive behavior
+-----------------------------------------
+The top bar keeps midnight. at the far left, with My Writings, Write, and the
+current user on the right. A persistent left navigation rail links to Feed,
+Messages, Search, and Account. At 760px and below the rail becomes a bottom
+navigation bar with compact labels and icons; the top bar and writing column
+also tighten. At very narrow widths, secondary top-bar labels collapse. The
+feed and editor use centered maximum widths for comfortable reading and writing.
+
+Published content requirement
+-----------------------------
+The public feed service had requested include_content=False and therefore only
+returned excerpts. The published feed serializer now includes full content,
+without changing models, migrations, route names, or adding endpoints. The
+frontend renders post.content with white-space preservation so paragraph
+breaks remain visible. Existing pagination and detail navigation remain.
+
+Files modified
+--------------
+client/index.html — read saved theme before the application mounts.
+client/src/App.jsx — shared shell and honest messages/search/account routes.
+client/src/components/Navbar.jsx — wordmark, top controls, theme toggle, sidebar.
+client/src/index.css — theme tokens, editorial system, focus styles, breakpoints.
+client/src/pages/Home.jsx — complete published writing and editorial feed.
+server/app/services/post_service.py — include full content in public feed items.
+docs/learning-notes/04-ui-redesign.txt — this milestone's implementation notes.
+
+CSS and Tailwind concepts used
+------------------------------
+CSS custom properties provide a single palette that changes with data-theme.
+Tailwind v4's @theme maps named utilities to design tokens. Utility overrides
+bridge older fixed-color classes during this redesign. Flexbox places the top
+bar controls and feed metadata; CSS Grid lays out navigation and loading states.
+max-width and width:min() preserve readable line lengths. Media queries convert
+the desktop sidebar into bottom navigation. :focus-visible provides keyboard
+focus without adding clutter to pointer interactions. color-mix softens alert
+surfaces while retaining theme-aware backgrounds.
+
+Frontend interview questions and answers
+-----------------------------------------
+1. Why use CSS custom properties for themes?
+   They let many components share one palette and switch it by changing a
+   parent attribute, without duplicating every component's styles.
+
+2. How does the theme survive a page refresh?
+   The app saves the selected value in localStorage and reads it when it starts.
+   The early HTML script applies it before React renders to avoid a flash.
+
+3. What does data-theme do here?
+   It is a semantic attribute on the root HTML element. CSS selectors use its
+   value to choose the light or dark custom-property values.
+
+4. Why constrain the width of long-form text?
+   Very long lines are harder to track while reading. A centered maximum width
+   keeps paragraphs comfortable on desktop and still fluid on small screens.
+
+5. How are paragraph breaks retained in the feed?
+   The content element uses white-space: pre-wrap, which preserves source
+   newlines while allowing long lines to wrap within the reading column.
+
+6. What is the purpose of :focus-visible?
+   It provides a clear keyboard focus indicator while avoiding a persistent
+   outline for every pointer click.
+
+7. How does the sidebar adapt to mobile?
+   A media query changes its fixed desktop rail into a fixed bottom bar, and
+   turns each navigation item into a compact icon-and-label stack.
+
+8. Why include the whole post body in the feed response?
+   The feed now renders the entire writing. An excerpt-only API response cannot
+   satisfy this requirement, so published feed records include content.
+
+9. What does React Router's NavLink provide?
+   It renders a link and reports whether its destination matches the current
+   route, allowing an active navigation style without manual URL parsing.
+
+10. Why keep search and messages as placeholders?
+    Their routes explain the current product state without presenting controls
+    that imply nonexistent search or messaging behavior.
