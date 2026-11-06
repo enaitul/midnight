@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import creatorImage from '../../../assets/images/creator.png'
+import creatorImage from '../assets/images/creator.png'
 
 export default function Creator() {
   return (
