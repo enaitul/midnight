@@ -1,4 +1,4 @@
-FROM node:22-alpine AS frontend
+FROM node:22-bookworm-slim AS frontend
 WORKDIR /build/client
 COPY client/package.json client/package-lock.json ./
 RUN npm ci
