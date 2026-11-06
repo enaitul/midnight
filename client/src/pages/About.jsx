@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ExternalLink, MessageCircle, X } from 'lucide-react'
+import { Check, MessageCircle, X } from 'lucide-react'
 import creatorImage from '../assets/images/creator.png'
 
-const FEEDBACK_FORM_URL = 'https://docs.google.com/forms/d/e/1FAIpQLSeusQp9fpn3YE4tCglvNQ5atcgvHWcqUlqwMNsbQWmApQGpqA/viewform'
+const FEEDBACK_FORM_URL = 'https://docs.google.com/forms/d/e/1FAIpQLSeusQp9fpn3YE4tCglvNQ5atcgvHWcqUlqwMNsbQWmApQGpqA/formResponse'
 const FEEDBACK_FORM_FIELDS = {
   name: 'entry.295161176',
   email: 'entry.598135056',
@@ -14,7 +14,8 @@ const FEEDBACK_FORM_FIELDS = {
 export default function About() {
   const [feedbackOpen, setFeedbackOpen] = useState(false)
   const [feedback, setFeedback] = useState({ name: '', email: '', rating: '', message: '' })
-  const [prefilledFormUrl, setPrefilledFormUrl] = useState('')
+  const [feedbackSubmitted, setFeedbackSubmitted] = useState(false)
+  const [feedbackSubmitting, setFeedbackSubmitting] = useState(false)
 
   useEffect(() => {
     if (!feedbackOpen) return undefined
@@ -25,22 +26,26 @@ export default function About() {
     return () => window.removeEventListener('keydown', closeOnEscape)
   }, [feedbackOpen])
 
-  const continueToGoogleForm = event => {
-    event.preventDefault()
-    const url = new URL(FEEDBACK_FORM_URL)
-    url.searchParams.set('usp', 'pp_url')
-    Object.entries(FEEDBACK_FORM_FIELDS).forEach(([field, entry]) => {
-      const value = feedback[field].trim()
-      if (value) url.searchParams.set(entry, value)
-    })
-    const prefilledUrl = url.toString()
-    setPrefilledFormUrl(prefilledUrl)
-    const formWindow = window.open(prefilledUrl, '_blank')
-    if (formWindow) formWindow.opener = null
-  }
-
   const updateFeedback = (field, value) => {
     setFeedback(current => ({ ...current, [field]: value }))
+  }
+
+  const handleFeedbackSubmit = () => {
+    setFeedbackSubmitting(true)
+  }
+
+  const handleFeedbackFrameLoad = () => {
+    if (feedbackSubmitting) {
+      setFeedbackSubmitting(false)
+      setFeedbackSubmitted(true)
+    }
+  }
+
+  const closeFeedback = () => {
+    setFeedbackOpen(false)
+    setFeedbackSubmitted(false)
+    setFeedbackSubmitting(false)
+    setFeedback({ name: '', email: '', rating: '', message: '' })
   }
 
   return (
@@ -96,42 +101,60 @@ export default function About() {
 
       {feedbackOpen && (
         <div className="feedback-backdrop" role="presentation" onMouseDown={event => {
-          if (event.target === event.currentTarget) setFeedbackOpen(false)
+          if (event.target === event.currentTarget) closeFeedback()
         }}>
           <section className="feedback-dialog" role="dialog" aria-modal="true" aria-labelledby="feedback-title">
+            <iframe
+              className="feedback-submit-frame"
+              name="midnight-feedback-submit"
+              title="Feedback submission status"
+              tabIndex={-1}
+              onLoad={handleFeedbackFrameLoad}
+            />
             <header className="feedback-dialog-header">
               <div>
                 <p className="eyebrow">A note for midnight.</p>
                 <h2 id="feedback-title">Share your feedback</h2>
               </div>
-              <button className="icon-action" type="button" onClick={() => setFeedbackOpen(false)} aria-label="Close feedback form">
+              <button className="icon-action" type="button" onClick={closeFeedback} aria-label="Close feedback form">
                 <X size={18} />
               </button>
             </header>
-            <p className="feedback-intro">A few honest words help make this space better. Your answers will open in Google Forms for you to review and submit.</p>
-            <form className="feedback-form" onSubmit={continueToGoogleForm}>
-              <div className="feedback-fields-row">
-                <label>Name<input autoComplete="name" maxLength={120} required value={feedback.name} onChange={event => updateFeedback('name', event.target.value)} /></label>
-                <label>Email <span className="feedback-optional">Optional</span><input type="email" autoComplete="email" maxLength={254} value={feedback.email} onChange={event => updateFeedback('email', event.target.value)} /></label>
+            {feedbackSubmitted ? (
+              <div className="feedback-success" role="status">
+                <span className="feedback-success-icon"><Check size={18} /></span>
+                <h3>Thank you for sharing.</h3>
+                <p>Your note has been received. It means a lot to this little corner of the internet.</p>
+                <button className="primary-action" type="button" onClick={closeFeedback}>Done</button>
               </div>
-              <fieldset className="feedback-rating">
-                <legend>How would you rate midnight? <span>Required</span></legend>
-                <div className="feedback-rating-options">
-                  {[1, 2, 3, 4, 5].map(rating => (
-                    <label className={feedback.rating === String(rating) ? 'selected' : ''} key={rating}>
-                      <input type="radio" name="feedback-rating" value={rating} required checked={feedback.rating === String(rating)} onChange={event => updateFeedback('rating', event.target.value)} />
-                      <span>{rating}</span>
-                    </label>
-                  ))}
-                </div>
-                <div className="feedback-rating-scale"><span>Not for me</span><span>Love it</span></div>
-              </fieldset>
-              <label className="feedback-message-field">Anything you’d like us to know? <span className="feedback-optional">Optional</span><textarea rows={4} maxLength={2000} value={feedback.message} onChange={event => updateFeedback('message', event.target.value)} /></label>
-              <div className="feedback-form-actions">
-                <button className="primary-action" type="submit">Continue to submit <ExternalLink size={15} /></button>
-                {prefilledFormUrl && <a href={prefilledFormUrl} target="_blank" rel="noreferrer">Open prefilled form <ExternalLink size={13} /></a>}
-              </div>
-            </form>
+            ) : (
+              <>
+                <p className="feedback-intro">A few honest words help make this space better. We use Google Forms to collect feedback.</p>
+                <form className="feedback-form" action={FEEDBACK_FORM_URL} method="POST" target="midnight-feedback-submit" onSubmit={handleFeedbackSubmit}>
+                  <div className="feedback-fields-row">
+                    <label>Name<input autoComplete="name" maxLength={120} required name={FEEDBACK_FORM_FIELDS.name} value={feedback.name} onChange={event => updateFeedback('name', event.target.value)} /></label>
+                    <label>Email <span className="feedback-optional">Optional</span><input type="email" autoComplete="email" maxLength={254} name={FEEDBACK_FORM_FIELDS.email} value={feedback.email} onChange={event => updateFeedback('email', event.target.value)} /></label>
+                  </div>
+                  <fieldset className="feedback-rating">
+                    <legend>How would you rate midnight? <span>Required</span></legend>
+                    <div className="feedback-rating-options">
+                      {[1, 2, 3, 4, 5].map(rating => (
+                        <label className={feedback.rating === String(rating) ? 'selected' : ''} key={rating}>
+                          <input type="radio" name={FEEDBACK_FORM_FIELDS.rating} value={rating} required checked={feedback.rating === String(rating)} onChange={event => updateFeedback('rating', event.target.value)} />
+                          <span>{rating}</span>
+                        </label>
+                      ))}
+                    </div>
+                    <div className="feedback-rating-scale"><span>Not for me</span><span>Love it</span></div>
+                  </fieldset>
+                  <label className="feedback-message-field">Anything you’d like us to know? <span className="feedback-optional">Optional</span><textarea rows={4} maxLength={2000} name={FEEDBACK_FORM_FIELDS.message} value={feedback.message} onChange={event => updateFeedback('message', event.target.value)} /></label>
+                  <p className="feedback-privacy-note">Your response is collected through Google Forms.</p>
+                  <div className="feedback-form-actions">
+                    <button className="primary-action" type="submit" disabled={feedbackSubmitting}>{feedbackSubmitting ? 'Sending…' : 'Send feedback'} <MessageCircle size={15} /></button>
+                  </div>
+                </form>
+              </>
+            )}
           </section>
         </div>
       )}
