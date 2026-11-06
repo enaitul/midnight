@@ -4,6 +4,7 @@ import { io } from 'socket.io-client'
 import { ArrowLeft, Check, Edit2, Loader, MessageCircle, Plus, Send, Users, X } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { communityService } from '../services/community'
+import { findUserSearchResult, getUserSearchResults } from '../services/searchResults'
 import { resolveAssetUrl } from '../services/api'
 
 export default function Messages() {
@@ -58,8 +59,8 @@ export default function Messages() {
     const username = searchParams.get('user')
     if (!username || !isAuthenticated) return
     let cancelled = false
-    communityService.search(username, 'users').then(async peopleFound => {
-      const person = peopleFound.find(item => item.username === username)
+    communityService.search(username, 'users').then(async data => {
+      const person = findUserSearchResult(data, username)
       if (!person || cancelled) return
       const conversation = await communityService.startDirect(person.id)
       if (cancelled) return
@@ -171,7 +172,7 @@ export default function Messages() {
   useEffect(() => {
     const term = personQuery.trim()
     if (!term || !dialog) { setPeople([]); return undefined }
-    const timer = window.setTimeout(() => communityService.search(term, 'users').then(setPeople).catch(() => setPeople([])), 250)
+    const timer = window.setTimeout(() => communityService.search(term, 'users').then(data => setPeople(getUserSearchResults(data))).catch(() => setPeople([])), 250)
     return () => window.clearTimeout(timer)
   }, [personQuery, dialog])
 
