@@ -712,7 +712,7 @@ export default function Messages() {
       {conversations.length === 0 ? <p className="feed-empty small">Your conversations will appear here.</p> : conversations.map(item => {
         const otherPerson = item.kind === 'direct' ? item.participants?.find(person => person.id !== user?.id) : null
         return <button type="button" key={item.id} onClick={() => openConversation(item)} className={`conversation-preview${activeId === item.id ? ' active' : ''}`}>
-        {item.kind === 'group' ? <GroupAvatar conversation={item} className="conversation-mark" /> : <span className="conversation-mark">{otherPerson?.avatar_url ? <img src={resolveAssetUrl(otherPerson.avatar_url)} alt="" loading="lazy" referrerPolicy="no-referrer" /> : <span aria-hidden="true">{(otherPerson?.display_name || '?').slice(0, 1).toUpperCase()}</span>}</span>}<span className="conversation-copy"><strong>{item.title || item.name || 'Conversation'}</strong><small>{item.last_message?.body || 'No messages yet'}</small></span><span className="conversation-trailing">{!item.unread_count && item.last_message?.created_at && <time className="conversation-time" dateTime={item.last_message.created_at} title={new Date(item.last_message.created_at).toLocaleString()}>{new Date(item.last_message.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</time>}{item.unread_count > 0 && <span className="unread-badge" aria-label={`${item.unread_count} unread messages`}>{item.unread_count}</span>}</span>
+        {item.kind === 'group' ? <GroupAvatar key={`${item.id}:${item.avatar_url || 'default'}`} conversation={item} className="conversation-mark" /> : <span className="conversation-mark">{otherPerson?.avatar_url ? <img src={resolveAssetUrl(otherPerson.avatar_url)} alt="" loading="lazy" referrerPolicy="no-referrer" /> : <span aria-hidden="true">{(otherPerson?.display_name || '?').slice(0, 1).toUpperCase()}</span>}</span>}<span className="conversation-copy"><strong>{item.title || item.name || 'Conversation'}</strong><small>{item.last_message?.body || 'No messages yet'}</small></span><span className="conversation-trailing">{!item.unread_count && item.last_message?.created_at && <time className="conversation-time" dateTime={item.last_message.created_at} title={new Date(item.last_message.created_at).toLocaleString()}>{new Date(item.last_message.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</time>}{item.unread_count > 0 && <span className="unread-badge" aria-label={`${item.unread_count} unread messages`}>{item.unread_count}</span>}</span>
       </button>})}
     </aside>
     <main className="message-thread">
@@ -720,7 +720,7 @@ export default function Messages() {
         <header className="group-info-header"><button type="button" onClick={returnToGroupChat} aria-label="Back to conversation"><ArrowLeft size={19} /><span>Back</span></button><h2>Group info</h2><span /></header>
         <div className="group-info-scroll">
           <section className="group-info-hero">
-            <GroupAvatar conversation={activeConversation} className="group-avatar-large" />
+            <GroupAvatar key={`${activeConversation.id}:${activeConversation.avatar_url || 'default'}`} conversation={activeConversation} className="group-avatar-large" />
             {activeRole === 'admin' && <div className="group-picture-actions">
               <input ref={groupAvatarInputRef} type="file" accept="image/jpeg,image/png,image/webp" onChange={uploadGroupPicture} hidden />
               <button type="button" onClick={() => groupAvatarInputRef.current?.click()} disabled={groupActionBusy}><Camera size={16} />{activeConversation.avatar_url ? 'Change picture' : 'Add picture'}</button>
@@ -767,7 +767,7 @@ export default function Messages() {
         <header className="thread-header">
           <button className="mobile-back" onClick={() => { clearComposer(); setActiveId(null) }} aria-label="Back to conversations"><ArrowLeft size={18} /></button>
           {activeConversation?.kind === 'group' ? <button type="button" className="group-header-trigger" onClick={openGroupInfo} aria-label="Open group information">
-            <GroupAvatar conversation={activeConversation} className="group-avatar-header" />
+            <GroupAvatar key={`${activeConversation.id}:${activeConversation.avatar_url || 'default'}`} conversation={activeConversation} className="group-avatar-header" />
             <span className="thread-person-copy"><strong>{activeConversation.name || 'Group conversation'}</strong><small className="thread-bio">{activeConversation.description || `${activeConversation.participants?.length || 0} members`}</small></span>
           </button> : <>
             {directPerson && <Link className="thread-profile-avatar" to={`/profile/${encodeURIComponent(directPerson.username)}`} aria-label={`View ${directPerson.display_name}'s profile`}>
