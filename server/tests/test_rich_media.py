@@ -53,9 +53,9 @@ def create_post(client, app, user_id, status='draft', content='Words beside the 
     return response.get_json()['post']['id']
 
 
-def image_bytes(image_format):
+def image_bytes(image_format, color='white'):
     result = BytesIO()
-    Image.new('RGB', (2, 2), 'white').save(result, format=image_format, quality=20)
+    Image.new('RGB', (2, 2), color).save(result, format=image_format, quality=90)
     return result.getvalue()
 
 
@@ -274,6 +274,15 @@ def test_group_admin_can_update_name_and_picture_while_members_cannot(media_app)
     assert conversation['avatar_url']
     assert client.get(conversation['avatar_url'], headers=headers(ids['reader'], app)).status_code == 200
     assert (tmp_path / 'post-media' / 'conversations' / conversation['avatar_url'].rsplit('/', 1)[1]).is_file()
+
+    first_picture_url = conversation['avatar_url']
+    replacement = client.post(avatar_url, headers=headers(ids['author'], app), data={
+        'avatar': (BytesIO(image_bytes('JPEG', 'navy')), 'replacement.jpg', 'image/jpeg'),
+    }, content_type='multipart/form-data')
+    assert replacement.status_code == 200, replacement.get_json()
+    replacement_url = replacement.get_json()['conversation']['avatar_url']
+    assert replacement_url != first_picture_url
+    assert client.get(replacement_url, headers=headers(ids['reader'], app)).data == image_bytes('JPEG', 'navy')
 
     removed = client.delete(avatar_url, headers=headers(ids['author'], app))
     assert removed.status_code == 200

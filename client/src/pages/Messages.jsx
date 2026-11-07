@@ -40,6 +40,7 @@ function GroupAvatar({ conversation, className = '' }) {
   const avatarPath = conversation?.avatar_url
   useEffect(() => {
     if (!avatarPath) { setImageUrl(''); return undefined }
+    setImageUrl('')
     let active = true
     let objectUrl = ''
     const endpoint = avatarPath.replace(/^\/api(?=\/)/, '')
