@@ -290,6 +290,54 @@ def test_conversation_access_persistence_group_management_and_realtime(app, user
     assert client.get(f'/api/conversations/{group_id}', headers=auth(cara_token)).status_code == 404
 
 
+def test_list_conversations_serializes_direct_group_unread_and_empty_results(app, users):
+    client = app.test_client()
+    alice_headers = auth(users['alice']['token'])
+    bob_headers = auth(users['bob']['token'])
+    cara_headers = auth(users['cara']['token'])
+
+    empty = client.get('/api/conversations', headers=cara_headers)
+    assert empty.status_code == 200
+    assert empty.get_json() == {'conversations': []}
+    assert client.get('/api/conversations').status_code == 401
+
+    direct = client.post('/api/conversations/direct', headers=alice_headers, json={'user_id': users['bob']['id']})
+    assert direct.status_code == 201
+    direct_id = direct.get_json()['conversation']['id']
+    assert client.post(f'/api/conversations/{direct_id}/messages', headers=alice_headers,
+                       json={'body': 'A direct note'}).status_code == 201
+
+    group = client.post('/api/conversations/groups', headers=alice_headers, json={
+        'name': 'Night letters', 'member_ids': [users['bob']['id'], users['cara']['id']],
+    })
+    assert group.status_code == 201
+    group_id = group.get_json()['conversation']['id']
+    assert client.post(f'/api/conversations/{group_id}/messages', headers=bob_headers,
+                       json={'body': 'A group note'}).status_code == 201
+
+    listed = client.get('/api/conversations', headers=alice_headers)
+    assert listed.status_code == 200
+    conversations = {item['id']: item for item in listed.get_json()['conversations']}
+    direct_item = conversations[direct_id]
+    group_item = conversations[group_id]
+    assert direct_item['kind'] == 'direct'
+    assert direct_item['last_message']['body'] == 'A direct note'
+    assert direct_item['unread_count'] == 0
+    assert {person['username'] for person in direct_item['participants']} == {'alice', 'bob'}
+    assert all(person['avatar_url'] is None for person in direct_item['participants'])
+    assert group_item['kind'] == 'group'
+    assert group_item['title'] == 'Night letters'
+    assert group_item['last_message']['body'] == 'A group note'
+    assert group_item['unread_count'] == 1
+    assert {person['username'] for person in group_item['participants']} == {'alice', 'bob', 'cara'}
+
+    forbidden = client.get(f'/api/conversations/{direct_id}/messages', headers=cara_headers)
+    assert forbidden.status_code == 404
+    history = client.get(f'/api/conversations/{group_id}/messages', headers=alice_headers)
+    assert history.status_code == 200
+    assert [message['body'] for message in history.get_json()['messages']] == ['A group note']
+
+
 def test_group_membership_admin_actions_and_removed_member_socket_privacy(app, users):
     client = app.test_client()
     alice_token = users['alice']['token']
