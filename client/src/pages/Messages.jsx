@@ -732,7 +732,7 @@ export default function Messages() {
           {error && <p className="inline-error group-info-error" role="alert">{error}</p>}
 
           <section className="group-info-section">
-            <header><div><p className="eyebrow">About</p><h3>Group details</h3></div>{activeRole === 'admin' && !editingGroupDetails && <button type="button" className="group-info-edit" onClick={() => { setGroupNameDraft(activeConversation.name || ''); setGroupDescriptionDraft(activeConversation.description || ''); setEditingGroupDetails(true) }}><Pencil size={15} /> Edit</button>}</header>
+            <header><div><p className="eyebrow">About</p><h3>Group details</h3></div>{activeRole === 'admin' && !editingGroupDetails && <button type="button" className="group-info-edit" onClick={() => { setGroupNameDraft(activeConversation.name || ''); setGroupDescriptionDraft(activeConversation.description || ''); setEditingGroupDetails(true) }}><Pencil size={15} /> Edit details</button>}</header>
             {editingGroupDetails ? <form className="group-info-form" onSubmit={saveGroupDetails}>
               <label>Group name<input value={groupNameDraft} onChange={event => setGroupNameDraft(event.target.value)} maxLength={100} required /></label>
               <label>Description<textarea value={groupDescriptionDraft} onChange={event => setGroupDescriptionDraft(event.target.value)} maxLength={500} rows={3} placeholder="Add a group description" /></label>

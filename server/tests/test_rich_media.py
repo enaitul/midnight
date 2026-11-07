@@ -239,6 +239,47 @@ def test_conversation_media_persists_and_is_private_to_members(media_app):
     assert client.get(media_only.get_json()['message']['media'][0]['url'], headers=headers(ids['reader'], app)).status_code == 200
 
 
+def test_group_admin_can_update_name_and_picture_while_members_cannot(media_app):
+    app, tmp_path, ids = media_app
+    client = app.test_client()
+    group = client.post('/api/conversations/groups', headers=headers(ids['author'], app), json={
+        'name': 'First name', 'member_ids': [ids['reader']],
+    })
+    assert group.status_code == 201
+    group_id = group.get_json()['conversation']['id']
+
+    details_url = f'/api/conversations/{group_id}/details'
+    denied_details = client.put(details_url, headers=headers(ids['reader'], app), json={
+        'name': 'Changed by member', 'description': 'Not allowed',
+    })
+    assert denied_details.status_code == 403
+    updated = client.put(details_url, headers=headers(ids['author'], app), json={
+        'name': 'Updated name', 'description': 'A short group description',
+    })
+    assert updated.status_code == 200
+    assert updated.get_json()['conversation']['name'] == 'Updated name'
+    assert updated.get_json()['conversation']['description'] == 'A short group description'
+
+    avatar_url = f'/api/conversations/{group_id}/group-avatar'
+    denied_picture = client.post(avatar_url, headers=headers(ids['reader'], app), data={
+        'avatar': (BytesIO(jpeg_bytes()), 'group.jpg', 'image/jpeg'),
+    }, content_type='multipart/form-data')
+    assert denied_picture.status_code == 403
+
+    uploaded = client.post(avatar_url, headers=headers(ids['author'], app), data={
+        'avatar': (BytesIO(jpeg_bytes()), 'group.jpg', 'image/jpeg'),
+    }, content_type='multipart/form-data')
+    assert uploaded.status_code == 200, uploaded.get_json()
+    conversation = uploaded.get_json()['conversation']
+    assert conversation['avatar_url']
+    assert client.get(conversation['avatar_url'], headers=headers(ids['reader'], app)).status_code == 200
+    assert (tmp_path / 'post-media' / 'conversations' / conversation['avatar_url'].rsplit('/', 1)[1]).is_file()
+
+    removed = client.delete(avatar_url, headers=headers(ids['author'], app))
+    assert removed.status_code == 200
+    assert removed.get_json()['conversation']['avatar_url'] is None
+
+
 def test_conversation_media_validates_type_and_rejects_empty_message(media_app):
     app, _, ids = media_app
     client = app.test_client()
