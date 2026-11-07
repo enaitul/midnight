@@ -1,7 +1,7 @@
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '../context/AuthContext'
-import { Settings, User as UserIcon, PenLine, House, MessageCircle, Search, CircleHelp, Bell, Moon, Type } from 'lucide-react'
+import { Settings, User as UserIcon, LogIn, PenLine, House, MessageCircle, Search, CircleHelp, Bell, Moon, Type } from 'lucide-react'
 import { io } from 'socket.io-client'
 import { communityService } from '../services/community'
 import { resolveAssetUrl } from '../services/api'
@@ -111,7 +111,7 @@ export default function Navbar() {
         {isAuthenticated ? <Link to={accountUrl} className="topbar-account" aria-label={`Account: ${displayName}`}>
           {user?.avatar_url ? <img src={resolveAssetUrl(user.avatar_url)} alt="" referrerPolicy="no-referrer" /> : <span className="topbar-avatar"><UserIcon size={16} /></span>}
           <span>{displayName}</span>
-        </Link> : <><Link to="/login" className="top-link">Sign in</Link><Link to="/register" className="top-link">Join</Link></>}
+        </Link> : <><Link to="/login" className="top-link topbar-signin">Sign in</Link><Link to="/register" className="top-link topbar-register">Join</Link></>}
         <Link to="/about" className="topbar-about" aria-label="About midnight" title="About midnight"><CircleHelp size={19} /></Link>
         {isAuthenticated && <Link to="/notifications" className="topbar-notifications" aria-label={`Notifications${unreadNotifications ? `, ${unreadNotifications} unread` : ''}`} title="Notifications"><Bell size={18} />{unreadNotifications > 0 && <b>{unreadNotifications > 99 ? '99+' : unreadNotifications}</b>}</Link>}
         <button ref={settingsButtonRef} className="theme-toggle settings-toggle" type="button" onClick={() => setSettingsOpen(open => !open)} aria-label="Settings" aria-expanded={settingsOpen} aria-controls="settings-panel" title="Settings">
@@ -147,9 +147,9 @@ export default function Navbar() {
     {!isAuthPage && <aside className="sidebar" aria-label="Main navigation">
       <nav>{navItems.map(({ to, label, Icon, end }) => <NavLink key={to} to={to} end={end} aria-label={label} title={label} className={({ isActive }) => `side-link${isActive ? ' active' : ''}${to === '/notifications' ? ' notifications-nav-link' : ''}`}>
         <Icon size={18} strokeWidth={1.7} /><span>{label}</span>{to === '/messages' && unreadMessages > 0 && <b className="nav-unread" aria-label={`${unreadMessages} unread messages`}>{unreadMessages > 99 ? '99+' : unreadMessages}</b>}{to === '/notifications' && unreadNotifications > 0 && <b className="nav-unread notification-nav-unread" aria-label={`${unreadNotifications} unread notifications`}>{unreadNotifications > 99 ? '99+' : unreadNotifications}</b>}
-      </NavLink>)}<Link to={accountUrl} className={`side-link side-profile-link${location.pathname.startsWith('/profile/') || location.pathname === '/account' ? ' active' : ''}`} aria-label="Profile" title="Profile">
-        {user?.avatar_url ? <img className="side-profile-avatar" src={resolveAssetUrl(user.avatar_url)} alt="" referrerPolicy="no-referrer" /> : <span className="side-profile-avatar side-profile-avatar-fallback"><UserIcon size={17} /></span>}
-        <span>Profile</span>
+      </NavLink>)}<Link to={accountUrl} className={`side-link side-profile-link${location.pathname.startsWith('/profile/') || location.pathname === '/account' ? ' active' : ''}`} aria-label={isAuthenticated ? 'Profile' : 'Sign in'} title={isAuthenticated ? 'Profile' : 'Sign in'}>
+        {isAuthenticated ? (user?.avatar_url ? <img className="side-profile-avatar" src={resolveAssetUrl(user.avatar_url)} alt="" referrerPolicy="no-referrer" /> : <span className="side-profile-avatar side-profile-avatar-fallback"><UserIcon size={17} /></span>) : <LogIn size={19} strokeWidth={1.8} />}
+        <span>{isAuthenticated ? 'Profile' : 'Sign in'}</span>
       </Link></nav>
     </aside>}
   </>

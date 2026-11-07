@@ -509,6 +509,8 @@ article .whitespace-pre-wrap { color: var(--soft-ink) !important; }
   .notifications-nav-link { display: none; }
   .top-link { font-size: 12px; }
   .top-link svg, .top-write svg { display: none; }
+  .topbar-register { display: none; }
+  .topbar-signin { display: inline-flex; }
   .user-chip span { display: none; }
   .top-write { padding: 8px 10px; }
   .sidebar { top: auto; bottom: 0; width: 100%; height: calc(62px + env(safe-area-inset-bottom)); padding: 4px 4px max(4px, env(safe-area-inset-bottom)); border-right: 0; border-top: 1px solid var(--line); flex-direction: row; align-items: stretch; }
@@ -634,7 +636,8 @@ body { font-size: 1rem; }
 @media (max-width: 420px) {
   .topbar { padding: 0 12px; }
   .topbar-actions { gap: 8px; }
-  .topbar-actions .top-link { display: none; }
+  .topbar-actions .top-link:not(.topbar-signin) { display: none; }
+  .topbar-actions .topbar-signin { display: inline-flex; }
   .feed-page { width: calc(100% - 30px); }
   .side-link { font-size: 7px; }
   .nav-unread { top: 2px; right: 3px; min-width: 17px; height: 17px; font-size: 9px; }
