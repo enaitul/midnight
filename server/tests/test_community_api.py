@@ -70,6 +70,27 @@ def test_profile_privacy_and_contribution_count(app, users):
     assert 'email' not in public
 
 
+def test_comment_likes_require_auth_and_toggle_once_per_user(app, users):
+    client = app.test_client()
+    with app.app_context():
+        post = Post(title='A quiet post', content='Words', status='published', author_id=users['alice']['id'])
+        db.session.add(post)
+        db.session.commit()
+        post_id = post.id
+    created = client.post(f'/api/posts/{post_id}/comments', headers=auth(users['bob']['token']), json={'body': 'A kind note'})
+    assert created.status_code == 201
+    comment = created.get_json()['comment']
+    assert comment['like_count'] == 0 and comment['liked_by_me'] is False
+    comment_id = comment['id']
+    assert client.post(f'/api/posts/comments/{comment_id}/like').status_code == 401
+    liked = client.post(f'/api/posts/comments/{comment_id}/like', headers=auth(users['cara']['token']))
+    assert liked.status_code == 200 and liked.get_json() == {'liked': True, 'like_count': 1}
+    rows = client.get(f'/api/posts/{post_id}/comments', headers=auth(users['cara']['token'])).get_json()['comments']
+    assert rows[0]['liked_by_me'] is True and rows[0]['like_count'] == 1
+    unliked = client.post(f'/api/posts/comments/{comment_id}/like', headers=auth(users['cara']['token']))
+    assert unliked.get_json() == {'liked': False, 'like_count': 0}
+
+
 def test_avatar_upload_and_profile_validation(app, users):
     client = app.test_client()
     image = BytesIO()

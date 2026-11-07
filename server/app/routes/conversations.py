@@ -1,12 +1,16 @@
-from flask import Blueprint, g, jsonify, request
+import uuid
+from flask import Blueprint, current_app, g, jsonify, request, send_file, Response, stream_with_context
+from werkzeug.utils import secure_filename
 from app import db
-from app.models.conversation import Conversation, ConversationParticipant, Message
+from app.models.conversation import Conversation, ConversationParticipant, Message, MessageMedia
 from app.services.conversation_service import (
     add_group_members, add_message, conversation_dict, leave_group, mark_read,
     membership, message_dict, remove_group_member, rename_group, create_direct, create_group,
     emit_to_conversation_members, emit_to_user,
 )
 from app.utils.auth_middleware import token_required
+from app.storage.media_storage import LocalMediaStorage, get_media_storage
+from app.utils.media_validation import MEDIA_TYPES, MEDIA_SIZE_CONFIG, validate_media_content
 
 conversations_bp = Blueprint('conversations', __name__, url_prefix='/api/conversations')
 
@@ -80,17 +84,106 @@ def get_messages(conversation_id):
 @conversations_bp.post('/<int:conversation_id>/messages')
 @token_required
 def send_rest_message(conversation_id):
-    data = request.get_json(silent=True) or {}
-    result = add_message(conversation_id, g.current_user.id, data.get('body'))
-    if len(result) == 3:
-        _, error, status = result
-        return jsonify({'error': error}), status
-    message, error = result
-    if error:
-        return jsonify({'error': error}), 400
+    conversation = _authorized_conversation(conversation_id)
+    if not conversation:
+        return jsonify({'error': 'Conversation not found'}), 404
+    has_files = request.mimetype == 'multipart/form-data'
+    data = request.form if has_files else (request.get_json(silent=True) or {})
+    body = data.get('body', '')
+    uploads = request.files.getlist('files') if has_files else []
+    if not isinstance(body, str) or len(body.strip()) > 5000 or (not body.strip() and not uploads):
+        return jsonify({'error': 'Messages must contain text or an attachment, with up to 5,000 characters'}), 400
+    message = None
+    saved = []
+    if uploads:
+        if len(uploads) > current_app.config['CONVERSATION_MEDIA_MAX_FILES']:
+            return jsonify({'error': f"A message can contain up to {current_app.config['CONVERSATION_MEDIA_MAX_FILES']} attachments"}), 400
+        storage = get_media_storage(category='conversations')
+        total_bytes = 0
+        try:
+            media_rows = []
+            for upload in uploads:
+                clean_name = secure_filename(upload.filename or '')
+                extension = clean_name.rsplit('.', 1)[-1].lower() if '.' in clean_name else ''
+                type_info = MEDIA_TYPES.get(extension)
+                if not clean_name or not type_info:
+                    raise ValueError('Supported formats: JPEG, PNG, WebP, MP3, WAV, OGG, M4A, MP4, and WebM')
+                media_type, canonical_mime, accepted_mimes, image_format = type_info
+                if upload.mimetype not in accepted_mimes:
+                    raise ValueError(f'The supplied MIME type does not match the selected {extension.upper()} format')
+                limit = current_app.config[MEDIA_SIZE_CONFIG[media_type]]
+                content = upload.read(limit + 1)
+                total_bytes += len(content)
+                if not content:
+                    raise ValueError(f'{clean_name} is empty')
+                if len(content) > limit:
+                    raise ValueError(f'{clean_name} exceeds its {limit // (1024 * 1024)} MB {media_type} file limit')
+                if total_bytes > current_app.config['CONVERSATION_MEDIA_MAX_TOTAL_BYTES']:
+                    raise ValueError('Attachments in one message must total 100 MB or less')
+                if not validate_media_content(extension, content, image_format):
+                    raise ValueError(f'{clean_name} is not a valid {extension.upper()} file')
+                stored_extension = 'jpg' if extension == 'jpeg' else extension
+                filename = f'{uuid.uuid4().hex}.{stored_extension}'
+                storage.save(filename, content, canonical_mime)
+                saved.append(filename)
+                media_rows.append((filename, clean_name[:255], media_type, canonical_mime, len(content)))
+            message = Message(conversation_id=conversation_id, sender_id=g.current_user.id, body=body.strip())
+            db.session.add(message)
+            db.session.flush()
+            db.session.add_all(MessageMedia(message_id=message.id, filename=filename, original_name=name,
+                                            media_type=kind, mime_type=mime, file_size=size)
+                               for filename, name, kind, mime, size in media_rows)
+            db.session.commit()
+        except ValueError as error:
+            db.session.rollback()
+            for filename in saved:
+                try: storage.delete(filename)
+                except Exception: current_app.logger.exception('Could not clean up rejected conversation media')
+            return jsonify({'error': str(error)}), 400
+        except Exception:
+            db.session.rollback()
+            for filename in saved:
+                try: storage.delete(filename)
+                except Exception: current_app.logger.exception('Could not clean up conversation media after database failure')
+            raise
+    else:
+        result = add_message(conversation_id, g.current_user.id, body)
+        if len(result) == 3:
+            _, error, status = result
+            return jsonify({'error': error}), status
+        message, error = result
+        if error:
+            return jsonify({'error': error}), 400
     payload = message_dict(message)
     emit_to_conversation_members(conversation_id, 'new_message', payload)
     return jsonify({'message': payload}), 201
+
+
+@conversations_bp.get('/media/<string:filename>')
+@token_required
+def serve_conversation_media(filename):
+    media = MessageMedia.query.filter_by(filename=filename).first()
+    if not media or not membership(media.message.conversation_id, g.current_user.id):
+        return jsonify({'error': 'Media not found'}), 404
+    storage = get_media_storage(category='conversations')
+    try:
+        if isinstance(storage, LocalMediaStorage):
+            response = send_file(storage.resolve(filename), mimetype=media.mime_type,
+                                 as_attachment=False, conditional=True, download_name=media.original_name)
+        else:
+            stored = storage.get_object(filename, request.headers.get('Range'))
+            status_code = 206 if stored.get('ContentRange') else 200
+            response = Response(stream_with_context(stored['Body'].iter_chunks()), status=status_code,
+                                mimetype=media.mime_type, direct_passthrough=True)
+            response.content_length = stored.get('ContentLength')
+            if stored.get('ContentRange'):
+                response.headers['Content-Range'] = stored['ContentRange']
+            response.headers['Accept-Ranges'] = 'bytes'
+        response.headers['Cache-Control'] = 'private, no-store'
+        response.headers['X-Content-Type-Options'] = 'nosniff'
+        return response
+    except FileNotFoundError:
+        return jsonify({'error': 'Media not found'}), 404
 
 
 @conversations_bp.post('/<int:conversation_id>/read')

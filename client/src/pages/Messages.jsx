@@ -1,11 +1,81 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { io } from 'socket.io-client'
-import { ArrowLeft, Check, Edit2, Loader, MessageCircle, Plus, Send, Users, X } from 'lucide-react'
+import { ArrowLeft, Check, Edit2, Loader, MessageCircle, Plus, Search, Send, Smile, Paperclip, Users, X } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { communityService } from '../services/community'
 import { findUserSearchResult, getUserSearchResults } from '../services/searchResults'
-import { resolveAssetUrl } from '../services/api'
+import api, { resolveAssetUrl } from '../services/api'
+
+const EMOJI_CATEGORIES = [
+  { name: 'Smileys', icon: '☺', items: [['😀','grinning'],['😃','smile'],['😄','happy'],['😁','beaming'],['😆','laugh'],['🥹','holding back tears'],['😊','blush'],['🙂','slight smile'],['🙃','upside down'],['😉','wink'],['😍','heart eyes'],['🥰','hearts'],['😘','kiss'],['😋','tasty'],['😎','cool'],['🤔','thinking'],['🤗','hug'],['🥳','party'],['😭','cry'],['😂','tears joy'],['😅','sweat'],['😴','sleep'],['😌','relieved'],['😇','angel'],['🤍','white heart'],['❤️','red heart'],['🫶','heart hands'],['💔','broken heart'],['🙏','thanks please'],['👏','clap']] },
+  { name: 'Nature', icon: '♧', items: [['🐶','dog'],['🐱','cat'],['🐻','bear'],['🦊','fox'],['🐼','panda'],['🐸','frog'],['🦋','butterfly'],['🐝','bee'],['🐢','turtle'],['🦉','owl'],['🐬','dolphin'],['🌿','herb'],['🍀','clover'],['🌸','cherry blossom'],['🌻','sunflower'],['🌙','moon'],['⭐','star'],['🌈','rainbow'],['☀️','sun'],['🌧️','rain']] },
+  { name: 'Food', icon: '◉', items: [['🍎','apple'],['🍓','strawberry'],['🍒','cherry'],['🍑','peach'],['🥑','avocado'],['🍕','pizza'],['🍔','burger'],['🍟','fries'],['🍜','noodles'],['🍣','sushi'],['🍰','cake'],['🍪','cookie'],['🍫','chocolate'],['☕','coffee'],['🫖','tea'],['🍵','green tea'],['🥛','milk'],['🍷','wine'],['🧋','bubble tea'],['🍯','honey']] },
+  { name: 'Activities', icon: '⚽', items: [['⚽','soccer'],['🏀','basketball'],['🏈','football'],['🎾','tennis'],['🎮','game'],['🎲','dice'],['🎨','art'],['🎭','theater'],['🎤','microphone'],['🎧','headphones'],['🎸','guitar'],['🎹','piano'],['🎬','movie'],['📚','books'],['✍️','writing'],['🧘','meditation'],['🏆','trophy'],['🎉','confetti'],['🎁','gift'],['🧩','puzzle']] },
+  { name: 'Travel', icon: '⌂', items: [['🚗','car'],['🚲','bicycle'],['✈️','airplane'],['🚀','rocket'],['🚂','train'],['⛵','sailboat'],['🏠','house'],['🏕️','camping'],['🏖️','beach'],['⛰️','mountain'],['🌋','volcano'],['🌆','city dusk'],['🌃','night city'],['🗼','tower'],['🗽','statue'],['🗺️','map'],['🧭','compass'],['🌍','earth'],['🌌','milky way'],['🏝️','island']] },
+  { name: 'Objects', icon: '▣', items: [['📱','phone'],['💻','laptop'],['⌚','watch'],['📷','camera'],['💡','light bulb'],['🔦','flashlight'],['🕯️','candle'],['🔑','key'],['🔒','lock'],['🪞','mirror'],['🧸','teddy'],['🎈','balloon'],['🛍️','shopping'],['✉️','envelope'],['📎','paperclip'],['📝','memo'],['📖','open book'],['🖋️','pen'],['🔋','battery'],['🧵','thread']] },
+  { name: 'Symbols', icon: '♡', items: [['❤️','red heart'],['💛','yellow heart'],['💚','green heart'],['💙','blue heart'],['💜','purple heart'],['🖤','black heart'],['🤎','brown heart'],['💯','hundred'],['✅','check'],['❌','cross'],['⚠️','warning'],['❓','question'],['❗','exclamation'],['✨','sparkles'],['🔥','fire'],['💫','dizzy'],['♻️','recycle'],['♾️','infinity'],['➕','plus'],['➰','loop']] },
+  { name: 'Flags', icon: '⚑', items: [['🏳️','white flag'],['🏴','black flag'],['🏁','checkered'],['🚩','triangular'],['🇺🇸','United States'],['🇬🇧','United Kingdom'],['🇨🇦','Canada'],['🇦🇺','Australia'],['🇮🇳','India'],['🇧🇩','Bangladesh'],['🇯🇵','Japan'],['🇰🇷','South Korea'],['🇫🇷','France'],['🇩🇪','Germany'],['🇮🇹','Italy'],['🇧🇷','Brazil'],['🇲🇽','Mexico'],['🇳🇬','Nigeria'],['🇿🇦','South Africa'],['🇵🇸','Palestine']] },
+]
+const MESSAGE_MEDIA_LIMITS = { image: 10, video: 100, audio: 25 }
+const MESSAGE_MEDIA_TYPES = { 'image/jpeg': 'image', 'image/png': 'image', 'image/webp': 'image', 'video/mp4': 'video', 'video/webm': 'video', 'audio/mpeg': 'audio', 'audio/mp3': 'audio', 'audio/wav': 'audio', 'audio/x-wav': 'audio', 'audio/ogg': 'audio', 'audio/mp4': 'audio', 'audio/x-m4a': 'audio' }
+
+const dayKey = value => {
+  const date = new Date(value)
+  return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`
+}
+const dayLabel = value => {
+  const date = new Date(value)
+  const today = new Date()
+  const yesterday = new Date(today)
+  yesterday.setDate(today.getDate() - 1)
+  if (dayKey(date) === dayKey(today)) return 'Today'
+  if (dayKey(date) === dayKey(yesterday)) return 'Yesterday'
+  return date.toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: date.getFullYear() === today.getFullYear() ? undefined : 'numeric' })
+}
+const messageLinks = text => text.split(/(https?:\/\/[^\s]+)/g).map((part, index) => /^https?:\/\//i.test(part)
+  ? <a key={index} href={part} target="_blank" rel="noreferrer noopener">{part}</a>
+  : part)
+
+function SharedMessageMedia({ item }) {
+  const containerRef = useRef(null)
+  const cancelledRef = useRef(false)
+  const requestedRef = useRef(false)
+  const [url, setUrl] = useState('')
+  const [failed, setFailed] = useState(false)
+
+  useEffect(() => {
+    cancelledRef.current = false
+    requestedRef.current = false
+    let objectUrl = ''
+    let observer
+    const load = () => {
+      if (requestedRef.current) return
+      requestedRef.current = true
+      api.get(item.url, { responseType: 'blob' }).then(response => {
+        objectUrl = URL.createObjectURL(response.data)
+        if (cancelledRef.current) { URL.revokeObjectURL(objectUrl); return }
+        setUrl(objectUrl)
+      }).catch(() => { if (!cancelledRef.current) setFailed(true) })
+    }
+    if (!window.IntersectionObserver) load()
+    else {
+      observer = new IntersectionObserver(entries => {
+        if (entries.some(entry => entry.isIntersecting)) { observer.disconnect(); load() }
+      }, { rootMargin: '180px' })
+      if (containerRef.current) observer.observe(containerRef.current)
+    }
+    return () => { cancelledRef.current = true; observer?.disconnect(); if (objectUrl) URL.revokeObjectURL(objectUrl) }
+  }, [item.url])
+
+  return <div className="message-media-item" ref={containerRef}>
+    {!url ? <span className="message-media-loading">{failed ? 'This attachment could not be loaded.' : `Loading ${item.media_type}…`}</span> : item.media_type === 'image'
+      ? <img src={url} alt={item.original_name || 'Shared image'} />
+      : item.media_type === 'video' ? <video src={url} controls playsInline preload="metadata" />
+        : <audio src={url} controls preload="metadata" />}
+    {item.media_type !== 'image' && <small>{item.original_name}</small>}
+  </div>
+}
 
 export default function Messages() {
   const { user, isAuthenticated, loading: authLoading } = useAuth()
@@ -28,12 +98,35 @@ export default function Messages() {
   const [socketConnected, setSocketConnected] = useState(false)
   const [newMessageCount, setNewMessageCount] = useState(0)
   const [newMessageSender, setNewMessageSender] = useState('')
+  const [emojiOpen, setEmojiOpen] = useState(false)
+  const [emojiCategory, setEmojiCategory] = useState(0)
+  const [emojiSearch, setEmojiSearch] = useState('')
+  const [attachments, setAttachments] = useState([])
+  const [uploadProgress, setUploadProgress] = useState(0)
+  const [historyHasMore, setHistoryHasMore] = useState(false)
+  const [loadingOlder, setLoadingOlder] = useState(false)
+  const [floatingDate, setFloatingDate] = useState('')
+  const [showFloatingDate, setShowFloatingDate] = useState(false)
   const socketRef = useRef(null)
   const conversationsRef = useRef([])
   const activeIdRef = useRef(null)
   const joinedRoomsRef = useRef(new Set())
   const bottomRef = useRef(null)
+  const historyRef = useRef(null)
+  const inputRef = useRef(null)
+  const scrollBottomRef = useRef(true)
+  const floatDateTimerRef = useRef(null)
+  const attachmentsRef = useRef([])
   const token = localStorage.getItem('midnight_token')
+
+  const clearComposer = useCallback(() => {
+    scrollBottomRef.current = true
+    attachmentsRef.current.forEach(item => URL.revokeObjectURL(item.preview))
+    attachmentsRef.current = []
+    setAttachments([])
+    setMessageBody('')
+    setEmojiOpen(false)
+  }, [])
 
   const loadConversations = useCallback(async () => {
     setError('')
@@ -48,7 +141,6 @@ export default function Messages() {
 
   useEffect(() => { conversationsRef.current = conversations }, [conversations])
   useEffect(() => { activeIdRef.current = activeId }, [activeId])
-
   useEffect(() => {
     if (authLoading) return
     if (!isAuthenticated) { setLoading(false); setError('Sign in to use messages.'); return }
@@ -65,11 +157,12 @@ export default function Messages() {
       const conversation = await communityService.startDirect(person.id)
       if (cancelled) return
       await loadConversations()
+      clearComposer()
       setActiveId(conversation.id)
       setSearchParams({}, { replace: true })
     }).catch(err => setError(err.response?.data?.error || 'Could not start the conversation.'))
     return () => { cancelled = true }
-  }, [searchParams, isAuthenticated, loadConversations, setSearchParams])
+  }, [searchParams, isAuthenticated, loadConversations, setSearchParams, clearComposer])
 
   const receiveMessage = useCallback(message => {
     if (message.conversation_id === activeIdRef.current) {
@@ -92,6 +185,7 @@ export default function Messages() {
   }, [user?.id])
 
   const openConversation = item => {
+    clearComposer()
     setNewMessageCount(item.unread_count || 0)
     setNewMessageSender(item.title || item.name || 'your conversation')
     setConversations(current => current.map(conversation => conversation.id === item.id ? { ...conversation, unread_count: 0 } : conversation))
@@ -104,7 +198,7 @@ export default function Messages() {
     setMessages([]); setActiveConversation(null); setError('')
     Promise.all([communityService.conversation(activeId), communityService.messages(activeId), communityService.markRead(activeId)])
       .then(([conversation, history]) => { if (alive.current) {
-        setActiveConversation(conversation); setMessages(history.messages)
+        setActiveConversation(conversation); setMessages(history.messages); setHistoryHasMore(history.has_more)
         setConversations(current => current.map(item => item.id === activeId ? { ...item, unread_count: 0 } : item))
         window.dispatchEvent(new CustomEvent('midnight:conversation-read', { detail: { id: activeId } }))
       } })
@@ -130,11 +224,11 @@ export default function Messages() {
       const conversationId = activeIdRef.current
       if (conversationId) {
         communityService.messages(conversationId)
-          .then(history => setMessages(current => {
+          .then(history => { setHistoryHasMore(history.has_more); setMessages(current => {
             const merged = new Map(current.map(message => [message.id, message]))
             history.messages.forEach(message => merged.set(message.id, message))
             return [...merged.values()].sort((a, b) => a.id - b.id)
-          }))
+          }) })
           .catch(err => setError(err.response?.data?.error || 'Conversation history could not be restored.'))
         communityService.markRead(conversationId)
           .then(() => {
@@ -153,10 +247,10 @@ export default function Messages() {
     })
     socket.on('conversation_removed', ({ conversation_id: conversationId }) => {
       setConversations(current => current.filter(item => item.id !== conversationId))
-      if (activeIdRef.current === conversationId) { setActiveId(null); setActiveConversation(null); setMessages([]) }
+      if (activeIdRef.current === conversationId) { clearComposer(); setActiveId(null); setActiveConversation(null); setMessages([]) }
     })
     return () => { socket.disconnect(); socketRef.current = null; joinedRoomsRef.current.clear(); setSocketConnected(false) }
-  }, [isAuthenticated, token, receiveMessage, loadConversations])
+  }, [isAuthenticated, token, receiveMessage, loadConversations, clearComposer])
 
   useEffect(() => {
     if (socketRef.current?.connected) conversations.forEach(item => {
@@ -167,7 +261,11 @@ export default function Messages() {
     })
   }, [conversations])
 
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
+  useEffect(() => { if (scrollBottomRef.current) bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
+  useEffect(() => () => {
+    attachmentsRef.current.forEach(item => URL.revokeObjectURL(item.preview))
+    window.clearTimeout(floatDateTimerRef.current)
+  }, [])
 
   useEffect(() => {
     const term = personQuery.trim()
@@ -179,16 +277,24 @@ export default function Messages() {
   const openDirect = async person => {
     try {
       const conversation = await communityService.startDirect(person.id)
-      setDialog(''); setPersonQuery(''); setActiveId(conversation.id); await loadConversations()
+      clearComposer(); setDialog(''); setPersonQuery(''); setActiveId(conversation.id); await loadConversations()
     } catch (err) { setError(err.response?.data?.error || 'Could not start the conversation.') }
   }
 
   const send = async event => {
     event.preventDefault()
     const body = messageBody.trim()
-    if (!body || !activeId || sending) return
-    setSending(true); setError('')
+    if ((!body && !attachments.length) || !activeId || sending) return
+    setSending(true); setError(''); setUploadProgress(0)
     try {
+      if (attachments.length) {
+        const result = await communityService.sendMessageWithMedia(activeId, body, attachments.map(item => item.file), setUploadProgress)
+        receiveMessage(result.message)
+        attachments.forEach(item => URL.revokeObjectURL(item.preview))
+        attachmentsRef.current = []
+        setAttachments([]); setMessageBody(''); setEmojiOpen(false); setUploadProgress(0); setSending(false)
+        return
+      }
       const socket = socketRef.current
       if (socket?.connected) {
         socket.timeout(10000).emit('send_message', { conversation_id: activeId, body }, (timeoutError, result) => {
@@ -208,11 +314,85 @@ export default function Messages() {
     } catch (err) { setError(err.response?.data?.error || 'Message was not sent.'); setSending(false) }
   }
 
+  const addAttachments = event => {
+    const files = Array.from(event.target.files || [])
+    event.target.value = ''
+    let issue = ''
+    const accepted = []
+    let totalBytes = attachments.reduce((total, item) => total + item.file.size, 0)
+    let available = 4 - attachments.length
+    for (const file of files) {
+      const mediaType = MESSAGE_MEDIA_TYPES[file.type]
+      if (!mediaType) { issue = 'Choose JPEG, PNG, WebP, MP4, WebM, MP3, WAV, OGG, or M4A files.'; continue }
+      if (file.size > MESSAGE_MEDIA_LIMITS[mediaType] * 1024 * 1024) { issue = `Each ${mediaType} file must be ${MESSAGE_MEDIA_LIMITS[mediaType]} MB or smaller.`; continue }
+      if (available <= 0) { issue = 'A message can contain up to 4 attachments.'; continue }
+      if (totalBytes + file.size > 100 * 1024 * 1024) { issue = 'Attachments in one message must total 100 MB or less.'; continue }
+      accepted.push({ file, mediaType, preview: URL.createObjectURL(file), key: crypto.randomUUID() })
+      totalBytes += file.size
+      available -= 1
+    }
+    const next = [...attachments, ...accepted]
+    attachmentsRef.current = next
+    setAttachments(next)
+    setError(issue)
+  }
+
+  const removeAttachment = key => {
+    const item = attachments.find(candidate => candidate.key === key)
+    if (item) URL.revokeObjectURL(item.preview)
+    const next = attachments.filter(candidate => candidate.key !== key)
+    attachmentsRef.current = next
+    setAttachments(next)
+  }
+
+  const insertEmoji = emoji => {
+    const input = inputRef.current
+    const start = input?.selectionStart ?? messageBody.length
+    const end = input?.selectionEnd ?? messageBody.length
+    const next = `${messageBody.slice(0, start)}${emoji}${messageBody.slice(end)}`
+    setMessageBody(next)
+    setEmojiOpen(false)
+    requestAnimationFrame(() => {
+      input?.focus()
+      input?.setSelectionRange(start + emoji.length, start + emoji.length)
+    })
+  }
+
+  const loadOlderMessages = async () => {
+    if (!historyHasMore || loadingOlder || !messages.length || !historyRef.current) return
+    const history = historyRef.current
+    const previousHeight = history.scrollHeight
+    setLoadingOlder(true)
+    try {
+      const result = await communityService.messages(activeId, { before: messages[0].id })
+      setHistoryHasMore(result.has_more)
+      if (result.messages.length) {
+        scrollBottomRef.current = false
+        setMessages(current => [...result.messages, ...current])
+        requestAnimationFrame(() => { history.scrollTop += history.scrollHeight - previousHeight })
+      }
+    } catch (err) { setError(err.response?.data?.error || 'Older messages could not be loaded.') }
+    finally { setLoadingOlder(false) }
+  }
+
+  const handleHistoryScroll = event => {
+    const history = event.currentTarget
+    scrollBottomRef.current = history.scrollHeight - history.scrollTop - history.clientHeight < 100
+    const visible = [...history.querySelectorAll('[data-message-date]')].find(element => element.offsetTop >= history.scrollTop + 40)
+    if (visible) {
+      setFloatingDate(visible.dataset.dateLabel)
+      setShowFloatingDate(true)
+    }
+    window.clearTimeout(floatDateTimerRef.current)
+    floatDateTimerRef.current = window.setTimeout(() => setShowFloatingDate(false), 1800)
+    if (history.scrollTop < 70 && historyHasMore) loadOlderMessages()
+  }
+
   const createGroup = async event => {
     event.preventDefault()
     try {
       const conversation = await communityService.startGroup(groupName, selectedPeople.map(person => person.id))
-      setDialog(''); setSelectedPeople([]); setPersonQuery(''); setGroupName(''); setActiveId(conversation.id); await loadConversations()
+      clearComposer(); setDialog(''); setSelectedPeople([]); setPersonQuery(''); setGroupName(''); setActiveId(conversation.id); await loadConversations()
     } catch (err) { setError(err.response?.data?.error || 'Group could not be created.') }
   }
 
@@ -226,7 +406,7 @@ export default function Messages() {
     catch (err) { setError(err.response?.data?.error || 'Member could not be removed.') }
   }
   const leaveGroup = async () => {
-    try { await communityService.leaveGroup(activeId); setActiveId(null); setActiveConversation(null); await loadConversations() }
+    try { await communityService.leaveGroup(activeId); clearComposer(); setActiveId(null); setActiveConversation(null); await loadConversations() }
     catch (err) { setError(err.response?.data?.error || 'Could not leave this group.') }
   }
 
@@ -258,8 +438,10 @@ export default function Messages() {
     <main className="message-thread">
       {!activeId ? <div className="thread-empty"><MessageCircle size={28} /><p>Choose a conversation, or begin a new one.</p></div> : <>
         <header className="thread-header">
-          <button className="mobile-back" onClick={() => setActiveId(null)} aria-label="Back to conversations"><ArrowLeft size={18} /></button>
-          {directPerson && (directPerson.avatar_url ? <img className="thread-avatar" src={resolveAssetUrl(directPerson.avatar_url)} alt="" referrerPolicy="no-referrer" /> : <span className="thread-avatar thread-avatar-fallback"><MessageCircle size={17} /></span>)}
+          <button className="mobile-back" onClick={() => { clearComposer(); setActiveId(null) }} aria-label="Back to conversations"><ArrowLeft size={18} /></button>
+          {directPerson && <Link className="thread-profile-avatar" to={`/profile/${encodeURIComponent(directPerson.username)}`} aria-label={`View ${directPerson.display_name}'s profile`}>
+            {directPerson.avatar_url ? <img className="thread-avatar" src={resolveAssetUrl(directPerson.avatar_url)} alt="" referrerPolicy="no-referrer" /> : <span className="thread-avatar thread-avatar-fallback">{(directPerson.display_name || '?').slice(0, 1).toUpperCase()}</span>}
+          </Link>}
           <div>
             {editingName ? (
               <form onSubmit={saveGroupName} className="flex items-center gap-1.5">
@@ -275,7 +457,9 @@ export default function Messages() {
               </form>
             ) : (
               <div className="flex items-center gap-2">
-                <h2>{activeConversation?.title || 'Conversation'}</h2>
+                <h2>{directPerson
+                  ? <Link className="thread-profile-name" to={`/profile/${encodeURIComponent(directPerson.username)}`}>{directPerson.display_name}</Link>
+                  : activeConversation?.title || 'Conversation'}</h2>
                 {activeConversation?.kind === 'group' && activeRole === 'admin' && (
                   <button
                     type="button"
@@ -293,10 +477,61 @@ export default function Messages() {
           {newMessageCount > 0 && <span className="thread-new-badge">{newMessageCount} new{newMessageSender ? ` · ${newMessageSender}` : ''}</span>}
           {activeConversation?.kind === 'group' && <span className="participants-count"><Users size={15} /> {activeConversation.participants.length}</span>}
         </header>
-        {activeConversation?.kind === 'group' && <div className="group-members">{activeConversation.participants.map(person => <span key={person.id}>{person.display_name}{activeRole === 'admin' && person.id !== user?.id && <button onClick={() => removeMember(person)} aria-label={`Remove ${person.display_name}`}><X size={12} /></button>}</span>)}{activeRole === 'admin' && <div className="member-add"><input value={personQuery} onChange={e => setPersonQuery(e.target.value)} placeholder="Add a member" />{people.filter(p => !activeConversation.participants.some(m => m.id === p.id)).map(person => <button key={person.id} onClick={() => manageMember(person)}>{person.display_name} <Plus size={13} /></button>)}</div>}<button className="text-action" onClick={leaveGroup}>Leave group</button></div>}
-        <div className="message-history">{messages.length === 0 ? <div className="thread-empty"><p>No messages yet. Begin when you're ready.</p></div> : messages.map(message => <article key={message.id} className={`chat-message${message.sender.id === user?.id ? ' mine' : ''}`}><div className="chat-message-byline"><strong>{message.sender.id === user?.id ? 'You' : message.sender.display_name}</strong><time>{new Date(message.created_at).toLocaleString()}</time></div><p>{message.body}</p></article>)}<div ref={bottomRef} /></div>
-        {error && <p className="inline-error">{error}</p>}
-        <form className="message-composer" onSubmit={send}><textarea value={messageBody} onChange={e => setMessageBody(e.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit() } }} maxLength={5000} placeholder="Write a message..." aria-label="Write a message" /><button type="submit" disabled={sending || !messageBody.trim()} aria-label="Send message">{sending ? <Loader size={17} className="animate-spin" /> : <Send size={17} />}</button></form>
+        {activeConversation?.kind === 'group' && <div className="group-members">{activeConversation.participants.map(person => <span key={person.id}><Link to={`/profile/${encodeURIComponent(person.username)}`}>{person.display_name}</Link>{activeRole === 'admin' && person.id !== user?.id && <button onClick={() => removeMember(person)} aria-label={`Remove ${person.display_name}`}><X size={12} /></button>}</span>)}{activeRole === 'admin' && <div className="member-add"><input value={personQuery} onChange={e => setPersonQuery(e.target.value)} placeholder="Add a member" />{people.filter(p => !activeConversation.participants.some(m => m.id === p.id)).map(person => <button key={person.id} onClick={() => manageMember(person)}>{person.display_name} <Plus size={13} /></button>)}</div>}<button className="text-action" onClick={leaveGroup}>Leave group</button></div>}
+        <div className="message-history" ref={historyRef} onScroll={handleHistoryScroll}>
+          {showFloatingDate && floatingDate && <div className="floating-message-date" aria-live="polite">{floatingDate}</div>}
+          {historyHasMore && <button className="load-older-messages" type="button" onClick={loadOlderMessages} disabled={loadingOlder}>{loadingOlder ? 'Loading…' : 'Load older messages'}</button>}
+          {messages.length === 0 ? <div className="thread-empty"><p>No messages yet. Begin when you're ready.</p></div> : messages.map((message, index) => {
+            const mine = message.sender.id === user?.id
+            const previous = messages[index - 1]
+            const next = messages[index + 1]
+            const startsGroup = !previous || previous.sender.id !== message.sender.id
+            const endsGroup = !next || next.sender.id !== message.sender.id
+            const startsDay = !previous || dayKey(previous.created_at) !== dayKey(message.created_at)
+            const media = message.media || []
+            const avatar = endsGroup ? <Link className="message-avatar-link" to={`/profile/${encodeURIComponent(message.sender.username)}`} aria-label={`View ${message.sender.display_name}'s profile`}>
+              {message.sender.avatar_url
+                ? <img className="message-avatar" src={resolveAssetUrl(message.sender.avatar_url)} alt="" loading="lazy" referrerPolicy="no-referrer" />
+                : <span className="message-avatar message-avatar-fallback" aria-hidden="true">{(message.sender.display_name || '?').slice(0, 1).toUpperCase()}</span>}
+            </Link> : <span className="message-avatar-spacer" />
+            return <div className="message-day-group" key={message.id}>
+              {startsDay && <div className="chat-date-separator"><span>{dayLabel(message.created_at)}</span></div>}
+              <article className={`chat-message${mine ? ' mine' : ''}${startsGroup ? ' group-start' : ''}${endsGroup ? ' group-end' : ''}`} data-message-date={dayKey(message.created_at)} data-date-label={dayLabel(message.created_at)}>
+                {!mine && avatar}
+                <div className="chat-message-stack">
+                  {activeConversation?.kind === 'group' && startsGroup && <Link className="chat-sender-name" to={`/profile/${encodeURIComponent(message.sender.username)}`}>{mine ? 'You' : message.sender.display_name}</Link>}
+                  <div className="chat-bubble">
+                    {message.body && <p>{messageLinks(message.body)}</p>}
+                    {!!media.length && <div className="message-media-list">{media.map(item => <SharedMessageMedia item={item} key={item.id} />)}</div>}
+                    <time dateTime={message.created_at}>{new Date(message.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</time>
+                  </div>
+                </div>
+                {mine && avatar}
+              </article>
+            </div>
+          })}
+          <div ref={bottomRef} />
+        </div>
+        {error && <p className="inline-error messages-thread-error">{error}</p>}
+        <div className="message-composer-wrap">
+          {emojiOpen && <div className="emoji-picker" role="dialog" aria-label="Choose an emoji">
+            <label className="emoji-search"><Search size={15} /><input value={emojiSearch} onChange={event => setEmojiSearch(event.target.value)} placeholder="Search emoji" aria-label="Search emoji" /></label>
+            {!emojiSearch && <nav className="emoji-categories" aria-label="Emoji categories">{EMOJI_CATEGORIES.map((category, index) => <button type="button" key={category.name} className={emojiCategory === index ? 'active' : ''} onClick={() => setEmojiCategory(index)} title={category.name} aria-label={category.name}>{category.icon}</button>)}</nav>}
+            <div className="emoji-grid">{(emojiSearch ? EMOJI_CATEGORIES.flatMap(category => category.items.filter(([, label]) => label.includes(emojiSearch.toLowerCase()))) : EMOJI_CATEGORIES[emojiCategory].items).map(([emoji, label], index) => <button type="button" key={`${emoji}-${label}-${index}`} onClick={() => insertEmoji(emoji)} title={label} aria-label={label}>{emoji}</button>)}</div>
+            {emojiSearch && !EMOJI_CATEGORIES.some(category => category.items.some(([, label]) => label.includes(emojiSearch.toLowerCase()))) && <p className="emoji-empty">No matching emoji</p>}
+          </div>}
+          {!!attachments.length && <div className="message-attachment-previews">{attachments.map(item => <figure key={item.key} className="message-attachment-preview">
+            {item.mediaType === 'image' ? <img src={item.preview} alt={`Preview of ${item.file.name}`} /> : item.mediaType === 'video' ? <video src={item.preview} /> : <span className="attachment-audio-icon">♫</span>}
+            <figcaption>{item.file.name}</figcaption><button type="button" onClick={() => removeAttachment(item.key)} disabled={sending} aria-label={`Remove ${item.file.name}`}><X size={14} /></button>
+          </figure>)}</div>}
+          {sending && attachments.length > 0 && <div className="message-upload-progress" role="status"><span>Uploading attachments</span><progress value={uploadProgress} max="100" /><small>{uploadProgress}%</small></div>}
+          <form className="message-composer" onSubmit={send}>
+            <button className={`composer-emoji-button${emojiOpen ? ' active' : ''}`} type="button" onClick={() => setEmojiOpen(open => !open)} aria-label="Choose emoji" aria-expanded={emojiOpen}><Smile size={20} /></button>
+            <label className="composer-attach-button" title="Attach photos, videos, or audio"><Paperclip size={19} /><input type="file" accept="image/jpeg,image/png,image/webp,video/mp4,video/webm,audio/mpeg,audio/wav,audio/ogg,audio/mp4,audio/x-m4a" multiple disabled={sending || attachments.length >= 4} onChange={addAttachments} aria-label="Attach media" /></label>
+            <textarea ref={inputRef} value={messageBody} onChange={event => setMessageBody(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit() } }} maxLength={5000} placeholder="Write a message…" aria-label="Write a message" rows={1} />
+            <button className="composer-send-button" type="submit" disabled={sending || (!messageBody.trim() && !attachments.length)} aria-label="Send message">{sending ? <Loader size={17} className="animate-spin" /> : <Send size={17} />}</button>
+          </form>
+        </div>
       </>}
     </main>
     {dialog && <div className="dialog-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) setDialog('') }}><section className="community-dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title"><header><h2 id="dialog-title">{dialog === 'group' ? 'Create a group' : 'New conversation'}</h2><button className="icon-action" onClick={() => setDialog('')} aria-label="Close"><X size={18} /></button></header>{dialog === 'group' && <label>Group name<input value={groupName} onChange={event => setGroupName(event.target.value)} maxLength={100} /></label>}<label>{dialog === 'group' ? 'Add people' : 'Find a person'}<input value={personQuery} onChange={event => setPersonQuery(event.target.value)} placeholder="Search by name or username" /></label><div className="people-picker">{people.filter(person => person.id !== user?.id).map(person => { const chosen = selectedPeople.some(item => item.id === person.id); return <button key={person.id} onClick={() => dialog === 'group' ? togglePerson(person) : openDirect(person)}><span>{person.display_name} <small>@{person.username}</small></span>{chosen ? <Check size={16} /> : <Plus size={16} />}</button>})}</div>{dialog === 'group' && <><p className="selected-count">{selectedPeople.length} people selected</p><button className="primary-action" disabled={!groupName.trim() || selectedPeople.length === 0} onClick={createGroup}>Create group</button></>}</section></div>}

@@ -41,6 +41,18 @@ class PostComment(db.Model):
         }
 
 
+class PostCommentLike(db.Model):
+    __tablename__ = 'post_comment_likes'
+    __table_args__ = (db.UniqueConstraint('comment_id', 'user_id', name='uq_post_comment_like_user'),)
+
+    id = db.Column(db.Integer, primary_key=True)
+    comment_id = db.Column(db.Integer, db.ForeignKey('post_comments.id', ondelete='CASCADE'), nullable=False, index=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    comment = db.relationship('PostComment', backref=db.backref('likes', cascade='all, delete-orphan'))
+    user = db.relationship('User')
+
+
 class PostMedia(db.Model):
     __tablename__ = 'post_media'
 

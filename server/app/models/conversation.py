@@ -43,3 +43,29 @@ class Message(db.Model):
 
     conversation = db.relationship('Conversation', back_populates='messages')
     sender = db.relationship('User')
+    media = db.relationship('MessageMedia', back_populates='message', cascade='all, delete-orphan', order_by='MessageMedia.id')
+
+
+class MessageMedia(db.Model):
+    __tablename__ = 'message_media'
+
+    id = db.Column(db.Integer, primary_key=True)
+    message_id = db.Column(db.Integer, db.ForeignKey('messages.id', ondelete='CASCADE'), nullable=False, index=True)
+    filename = db.Column(db.String(100), nullable=False, unique=True)
+    original_name = db.Column(db.String(255), nullable=False)
+    media_type = db.Column(db.String(10), nullable=False)
+    mime_type = db.Column(db.String(100), nullable=False)
+    file_size = db.Column(db.Integer, nullable=False)
+    created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+    message = db.relationship('Message', back_populates='media')
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'url': f'/api/conversations/media/{self.filename}',
+            'original_name': self.original_name,
+            'media_type': self.media_type,
+            'mime_type': self.mime_type,
+            'file_size': self.file_size,
+        }

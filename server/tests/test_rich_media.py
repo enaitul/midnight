@@ -198,3 +198,58 @@ def test_missing_media_file_returns_safe_404(media_app):
     response = client.get(media['url'])
     assert response.status_code == 404
     assert str(tmp_path) not in response.get_data(as_text=True)
+
+
+def test_conversation_media_persists_and_is_private_to_members(media_app):
+    app, tmp_path, ids = media_app
+    app.config['POST_MEDIA_MAX_IMAGE_BYTES'] = 10 * 1024 * 1024
+    with app.app_context():
+        outsider = User(username='outsider', email='outsider@example.test', display_name='outsider', password_hash='hashed')
+        db.session.add(outsider)
+        db.session.commit()
+        outsider_id = outsider.id
+    client = app.test_client()
+    conversation = client.post('/api/conversations/direct', headers=headers(ids['author'], app), json={
+        'user_id': ids['reader'],
+    }).get_json()['conversation']
+    sent = client.post(f"/api/conversations/{conversation['id']}/messages", headers=headers(ids['author'], app), data={
+        'body': 'A photo for you',
+        'files': (BytesIO(jpeg_bytes()), 'note.jpg', 'image/jpeg'),
+    }, content_type='multipart/form-data')
+    assert sent.status_code == 201, sent.get_json()
+    payload = sent.get_json()['message']
+    assert payload['body'] == 'A photo for you' and len(payload['media']) == 1
+    media = payload['media'][0]
+    assert media['original_name'] == 'note.jpg' and media['file_size'] > 0
+    assert (tmp_path / 'post-media' / 'conversations' / media['url'].rsplit('/', 1)[1]).is_file()
+    assert client.get(media['url']).status_code == 401
+    assert client.get(media['url'], headers=headers(outsider_id, app)).status_code == 404
+    assert client.get(media['url'], headers=headers(ids['reader'], app)).status_code == 200
+    history = client.get(f"/api/conversations/{conversation['id']}/messages", headers=headers(ids['reader'], app))
+    assert history.get_json()['messages'][0]['media'][0]['id'] == media['id']
+
+    group = client.post('/api/conversations/groups', headers=headers(ids['author'], app), json={
+        'name': 'Quiet room', 'member_ids': [ids['reader']],
+    }).get_json()['conversation']
+    media_only = client.post(f"/api/conversations/{group['id']}/messages", headers=headers(ids['author'], app), data={
+        'body': '', 'files': (BytesIO(jpeg_bytes()), 'moment.jpg', 'image/jpeg'),
+    }, content_type='multipart/form-data')
+    assert media_only.status_code == 201
+    assert media_only.get_json()['message']['body'] == ''
+    assert client.get(media_only.get_json()['message']['media'][0]['url'], headers=headers(ids['reader'], app)).status_code == 200
+
+
+def test_conversation_media_validates_type_and_rejects_empty_message(media_app):
+    app, _, ids = media_app
+    client = app.test_client()
+    conversation = client.post('/api/conversations/direct', headers=headers(ids['author'], app), json={
+        'user_id': ids['reader'],
+    }).get_json()['conversation']
+    url = f"/api/conversations/{conversation['id']}/messages"
+    empty = client.post(url, headers=headers(ids['author'], app), data={'body': '   '}, content_type='multipart/form-data')
+    assert empty.status_code == 400
+    bad = client.post(url, headers=headers(ids['author'], app), data={
+        'body': '', 'files': (BytesIO(b'not a video'), 'clip.mov', 'video/quicktime'),
+    }, content_type='multipart/form-data')
+    assert bad.status_code == 400
+    assert client.get(url, headers=headers(ids['reader'], app)).status_code == 200

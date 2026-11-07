@@ -47,6 +47,7 @@ def message_dict(message):
         'conversation_id': message.conversation_id,
         'body': message.body,
         'created_at': message.created_at.isoformat(),
+        'media': [item.to_dict() for item in message.media],
         'sender': {
             'id': message.sender.id,
             'username': message.sender.username,

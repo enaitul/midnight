@@ -135,8 +135,13 @@ def get_media_storage(config=None, category='posts'):
     settings = config or current_app.config
     backend = settings.get('MEDIA_STORAGE_BACKEND', 'local').strip().lower()
     if backend == 'local':
-        folder = 'AVATAR_UPLOAD_FOLDER' if category == 'avatars' else 'POST_MEDIA_FOLDER'
-        return LocalMediaStorage(settings[folder])
+        if category == 'avatars':
+            root = settings['AVATAR_UPLOAD_FOLDER']
+        elif category == 'conversations':
+            root = os.path.join(settings['POST_MEDIA_FOLDER'], 'conversations')
+        else:
+            root = settings['POST_MEDIA_FOLDER']
+        return LocalMediaStorage(root)
     if backend == 's3':
         return S3MediaStorage(settings.get('S3_BUCKET'), settings.get('S3_REGION'),
                               settings.get('S3_ENDPOINT_URL'), f"{settings.get('S3_PREFIX', 'midnight').strip('/')}/{category}")

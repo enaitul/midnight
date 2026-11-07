@@ -48,8 +48,11 @@ class Config:
     POST_MEDIA_MAX_VIDEO_BYTES = int(os.getenv('POST_MEDIA_MAX_VIDEO_MB', '100')) * 1024 * 1024
     POST_MEDIA_MAX_AUDIO_BYTES = int(os.getenv('POST_MEDIA_MAX_AUDIO_MB', '25')) * 1024 * 1024
     POST_MEDIA_MAX_ATTACHMENTS = int(os.getenv('POST_MEDIA_MAX_ATTACHMENTS', '10'))
-    # Requests upload one file at a time; leave space for multipart framing.
-    MAX_CONTENT_LENGTH = POST_MEDIA_MAX_VIDEO_BYTES + 2 * 1024 * 1024
+    CONVERSATION_MEDIA_MAX_FILES = int(os.getenv('CONVERSATION_MEDIA_MAX_FILES', '4'))
+    CONVERSATION_MEDIA_MAX_TOTAL_BYTES = int(os.getenv('CONVERSATION_MEDIA_MAX_TOTAL_MB', '100')) * 1024 * 1024
+    # Post files upload one at a time; conversation messages may combine files.
+    # Leave room for the larger configured payload and multipart framing.
+    MAX_CONTENT_LENGTH = max(POST_MEDIA_MAX_VIDEO_BYTES, CONVERSATION_MEDIA_MAX_TOTAL_BYTES) + 2 * 1024 * 1024
     SOCKETIO_CORS_ALLOWED_ORIGINS = [
         origin.strip() for origin in os.getenv(
             'SOCKETIO_CORS_ALLOWED_ORIGINS',

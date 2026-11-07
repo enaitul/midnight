@@ -25,10 +25,13 @@ export const postService = {
     return res.data.post
   },
 
-  addMedia: async (id, files) => {
+  addMedia: async (id, files, onProgress) => {
     const data = new FormData()
     files.forEach(file => data.append('files', file))
-    const res = await api.post(`/posts/${id}/media`, data, { headers: { 'Content-Type': 'multipart/form-data' } })
+    const res = await api.post(`/posts/${id}/media`, data, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      onUploadProgress: event => { if (event.total && onProgress) onProgress(Math.round(event.loaded / event.total * 100)) },
+    })
     return res.data.media
   },
   reorderMedia: async (id, order) => {
@@ -39,6 +42,7 @@ export const postService = {
   toggleLike: async id => (await api.post(`/posts/${id}/like`)).data,
   getComments: async id => (await api.get(`/posts/${id}/comments`)).data.comments,
   addComment: async (id, body) => (await api.post(`/posts/${id}/comments`, { body })).data,
+  toggleCommentLike: async id => (await api.post(`/posts/comments/${id}/like`)).data,
 
   // Update post
   updatePost: async (id, { title, content, status }) => {

@@ -129,7 +129,7 @@ export default function About() {
               </div>
             ) : (
               <>
-                <p className="feedback-intro">A few honest words help make this space better. We use Google Forms to collect feedback.</p>
+                <p className="feedback-intro">A few honest words help make this space better.</p>
                 <form className="feedback-form" action={FEEDBACK_FORM_URL} method="POST" target="midnight-feedback-submit" onSubmit={handleFeedbackSubmit}>
                   <div className="feedback-fields-row">
                     <label>Name<input autoComplete="name" maxLength={120} required name={FEEDBACK_FORM_FIELDS.name} value={feedback.name} onChange={event => updateFeedback('name', event.target.value)} /></label>
@@ -148,7 +148,6 @@ export default function About() {
                     <div className="feedback-rating-scale"><span>Not for me</span><span>Love it</span></div>
                   </fieldset>
                   <label className="feedback-message-field">Anything you’d like us to know? <span className="feedback-optional">Optional</span><textarea rows={4} maxLength={2000} name={FEEDBACK_FORM_FIELDS.message} value={feedback.message} onChange={event => updateFeedback('message', event.target.value)} /></label>
-                  <p className="feedback-privacy-note">Your response is collected through Google Forms.</p>
                   <div className="feedback-form-actions">
                     <button className="primary-action" type="submit" disabled={feedbackSubmitting}>{feedbackSubmitting ? 'Sending…' : 'Send feedback'} <MessageCircle size={15} /></button>
                   </div>

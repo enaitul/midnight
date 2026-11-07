@@ -23,6 +23,15 @@ export const communityService = {
   conversation: async (id) => (await api.get(`/conversations/${id}`)).data.conversation,
   messages: async (id, params = {}) => (await api.get(`/conversations/${id}/messages`, { params })).data,
   sendMessage: async (id, body) => (await api.post(`/conversations/${id}/messages`, { body })).data,
+  sendMessageWithMedia: async (id, body, files, onProgress) => {
+    const data = new FormData()
+    data.append('body', body)
+    files.forEach(file => data.append('files', file))
+    return (await api.post(`/conversations/${id}/messages`, data, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      onUploadProgress: event => { if (event.total) onProgress(Math.round(event.loaded / event.total * 100)) },
+    })).data
+  },
   startDirect: async (userId) => (await api.post('/conversations/direct', { user_id: userId })).data.conversation,
   startGroup: async (name, memberIds) => (await api.post('/conversations/groups', { name, member_ids: memberIds })).data.conversation,
   addMembers: async (id, memberIds) => (await api.post(`/conversations/${id}/participants`, { member_ids: memberIds })).data.conversation,

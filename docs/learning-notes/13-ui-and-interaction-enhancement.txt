@@ -1,0 +1,233 @@
+midnight. — UI, Messaging & Interaction Enhancement
+====================================================
+
+Purpose
+-------
+This note records the UI, messaging, media, and comment interaction changes in
+this enhancement. The Alembic migration was created but was not applied to any
+database. Browser and device checks were not available in this environment.
+
+What changed and why
+--------------------
+
+1. Messaging layout and navigation
+   `client/src/pages/Messages.jsx` and `client/src/index.css` now keep the
+   conversation list, thread header, and composer in the messaging viewport.
+   The message history is the primary scrolling region. The page uses viewport
+   height units and contained overscroll to prevent the document from moving
+   while reading a thread. On narrow screens, the list and conversation act as
+   separate views; the back arrow returns to the list and the bottom navigation
+   is hidden until the user leaves the active thread. Safe-area padding protects
+   the composer near the mobile keyboard and screen edge.
+
+2. Message bubbles, grouping, and dates
+   Bubbles use separate sent and received colors, wrap long text and links, and
+   place local timestamps at the lower right. Group conversations display a
+   sender label once at the beginning of a run. The avatar is chosen by looking
+   ahead to the next message: only the final message in a consecutive sender
+   group gets an avatar. Existing history and socket-delivered messages use the
+   same rendering rule, so later replies do not remove an earlier avatar.
+   Missing avatars use an initial fallback. Calendar changes create permanent
+   centered separators labelled Today, Yesterday, or a formatted date. A
+   temporary sticky date label appears during scrolling and fades after the
+   scroll stops. Older history can be loaded using the existing `before` API
+   cursor without losing the reader's scroll position.
+
+3. Composer and emoji selection
+   The composer has an emoji control, media attachment control, rounded text
+   field, and circular send button. Enter sends; Shift+Enter inserts a newline.
+   The in-repository Unicode picker includes eight categories, category buttons,
+   and text search, without adding a dependency or using proprietary artwork.
+   Choosing an emoji inserts it at the textarea selection range.
+
+4. Conversation media
+   Messages can include text, images, video, audio, or media alone. The client
+   previews up to four selected files, supports removal, and reports upload
+   progress. The server validates filename extension, declared MIME type,
+   content signature, per-file size, total request size, and conversation
+   membership before saving. Failed validation and database commits clean up
+   files already written for that request. Media metadata is stored in
+   `message_media`; message history and socket payloads include its metadata.
+   The storage adapter is reused: local files live below the post-media folder
+   in `conversations/`, while S3 uses the `conversations` key prefix. The media
+   endpoint requires a valid token and current conversation membership and does
+   not expose bucket URLs. The client fetches protected media with its API token
+   and renders object URLs for images, video controls, and audio controls.
+
+   Per-file defaults match post media: 10 MB for images, 25 MB for audio, and
+   100 MB for video. One conversation message is capped at 100 MB combined. The
+   Flask request limit remains 102 MB including multipart overhead. The
+   repository has no reverse-proxy body-size configuration, so the deployed
+   platform edge must allow at least this request size. Local storage behavior
+   is covered by tests; a live S3 bucket and production edge were not available
+   for testing.
+
+5. Comment likes
+   Comments now show an avatar or initial fallback, date and time, readable
+   wrapping text, and a right-aligned heart with a count. The client updates
+   likes optimistically, prevents overlapping requests for the same comment,
+   and restores the previous state if the request fails. The API requires
+   authentication and only allows likes on comments belonging to published
+   posts. A database uniqueness constraint on `(comment_id, user_id)` prevents
+   duplicate rows. Migration `b672a9278ec1` creates `post_comment_likes` and
+   `message_media`; it remains unapplied.
+
+6. Writing Studio and media uploads
+   `client/src/pages/Write.jsx` is arranged into Writing details, Media
+   attachments, and Publishing sections. It distinguishes title and body,
+   exposes separate image, video, and audio selectors, keeps the existing media
+   previews and ordering controls, shows upload progress, and labels draft and
+   publish actions. The existing API already uploads post attachments one at a
+   time; progress is now surfaced per upload and aggregated across attachments.
+   Unsaved edits are indicated and the browser warns before closing the tab.
+   Media-only posts remain supported through the existing draft-first upload
+   flow.
+
+7. Video flow audit
+   Existing post-media tests exercise MP4 and WebM content validation,
+   persistence outside the database, metadata, draft privacy, publishing, and
+   playback endpoint access. The UI uses `PostMediaDisplay` on feed, detail,
+   profile, and search surfaces. Local range responses use Flask conditional
+   file serving; S3 range reads use the existing private storage adapter. This
+   work did not run a browser upload, test a live S3 provider, or validate a
+   managed reverse-proxy limit, so those production checks remain open.
+
+8. Motion, responsive behavior, and themes
+   Message arrival, emoji picker, attachment preview, comment heart, and dialog
+   transitions use short CSS animations. Interactive controls and tabs have
+   subtle hover/focus transitions. A `prefers-reduced-motion` rule minimizes
+   animation and transition durations. Styling uses the existing CSS theme
+   variables, so the light and dark palettes remain the source of colors.
+
+Files changed or created
+-----------------------
+- `client/src/pages/Messages.jsx`
+- `client/src/pages/Write.jsx`
+- `client/src/components/PostEngagement.jsx`
+- `client/src/services/community.js`
+- `client/src/services/posts.js`
+- `client/src/index.css`
+- `server/app/config.py`
+- `server/app/models/__init__.py`
+- `server/app/models/conversation.py`
+- `server/app/models/post_engagement.py`
+- `server/app/routes/conversations.py`
+- `server/app/routes/posts.py`
+- `server/app/services/conversation_service.py`
+- `server/app/storage/media_storage.py`
+- `server/app/utils/media_validation.py` (new shared validation helper)
+- `server/migrations/versions/b672a9278ec1_add_comment_likes_and_message_media.py` (new)
+- `server/tests/test_community_api.py`
+- `server/tests/test_rich_media.py`
+- `docs/learning-notes/13-ui-and-interaction-enhancement.txt` (this note)
+
+Backend and database details
+----------------------------
+- New authenticated route: `POST /api/conversations/<id>/messages` accepts
+  multipart fields `body` and `files`, while preserving existing JSON text
+  messages and Socket.IO events.
+- New authenticated route: `GET /api/conversations/media/<filename>` checks
+  active conversation membership before local or S3-compatible delivery.
+- New authenticated route: `POST /api/posts/comments/<id>/like` toggles a
+  comment like and returns the liked state and current count.
+- Migration `b672a9278ec1` adds the comment-like table and message-media table.
+  No production migration was applied.
+- No dependency was added.
+
+Verification performed
+----------------------
+- Backend: `server/.venv/Scripts/python.exe -m pytest -q` — 33 passed.
+- Frontend: `npm test` — 5 passed.
+- Frontend: `npm run build` — passed.
+- Frontend: `npm run lint` — completed with 10 warnings in existing effects and
+  Fast Refresh exports across Home, Search, Navbar, Profile, My Writings,
+  Messages, and AuthContext; no lint errors.
+- Python bytecode compilation for the changed server modules and tests passed.
+- `git diff --check` passed.
+- No browser, tablet, or mobile-device run was possible; visual, keyboard,
+  Socket.IO live, screen-reader, and production S3 checks remain unverified.
+
+Commands used
+-------------
+- `npm run build`
+- `npm test`
+- `npm run lint`
+- `server/.venv/Scripts/python.exe -m pytest -q`
+- `server/.venv/Scripts/python.exe -m py_compile ...`
+- `git diff --check`
+
+Common debugging scenarios
+--------------------------
+- If a message upload returns 413, compare the selected total size with the
+  100 MB message cap, Flask's 102 MB request limit, and the deployed edge limit.
+- If a media item cannot be viewed, check that the viewer is still a member of
+  the conversation, the metadata row exists, the storage key is present, and the
+  local/S3 storage category is `conversations`.
+- If media is missing after a redeploy, verify that production uses persistent
+  S3-compatible storage rather than ephemeral local disk.
+- If a comment heart rolls back, inspect the authenticated API response and
+  confirm the migration has been applied to the database before deploying.
+- If older messages jump while loading, compare the message API's `before` ID
+  cursor with the scroll-height restoration in the history view.
+- If avatars appear at the wrong message, inspect the adjacent sender IDs in
+  the loaded history and the socket message order.
+- If dates differ around midnight, compare the browser's local timezone with
+  the UTC timestamp returned by the API.
+- If a video starts but cannot seek, inspect the response status and `Range` /
+  `Content-Range` headers for local and S3 storage separately.
+- If uploads fail before Flask logs a request, inspect the hosting edge's body
+  size cap and timeout settings.
+- If a user's draft becomes public, inspect the draft-first post creation and
+  final status update sequence in `Write.jsx` and the post API.
+
+Interview questions and answers
+-------------------------------
+1. How does the chat avoid scrolling the whole page?
+   The app shell and messaging viewport use constrained viewport heights and
+   hidden overflow; the message history owns vertical scrolling.
+
+2. How does avatar grouping keep earlier senders' avatars visible?
+   Each message compares its sender ID with the next history item. The final
+   item before a different sender, or the end of history, gets the avatar.
+
+3. How are date separators calculated?
+   Messages are converted to browser-local calendar-day keys. A separator is
+   rendered when the key differs from the previous message.
+
+4. Why is there both a permanent date separator and a floating date label?
+   The separator preserves context in the history; the temporary label helps
+   identify a date while the reader scrolls through older messages.
+
+5. How does older message loading preserve scroll position?
+   The client requests records before the oldest loaded message, prepends them,
+   then adjusts scroll position by the increase in scroll height.
+
+6. How do conversation media reads stay private?
+   The media route requires a JWT and checks current conversation membership
+   before reading the storage object.
+
+7. Why store message media in object storage rather than the SQL database?
+   The database stores metadata and a random storage key; the existing adapter
+   stores file bytes locally in development or in S3-compatible storage.
+
+8. How are uploads validated?
+   The backend checks filename extension, MIME type, content signature, per-type
+   size, aggregate message size, and conversation membership.
+
+9. How does optimistic comment liking remain consistent?
+   The client updates state immediately, locks that comment while the request is
+   pending, and rolls back on failure. A unique database constraint prevents
+   duplicate like rows.
+
+10. What protects against a message upload leaving orphaned files on failure?
+    The route tracks each saved key and deletes those objects if validation or
+    the database transaction fails.
+
+11. How does the emoji picker avoid proprietary assets?
+    It uses Unicode emoji characters with an in-app category/search interface;
+    it adds no image pack or runtime dependency.
+
+12. What still needs production verification?
+    Apply the migration through the normal release process, then test uploads
+    against the configured private S3 bucket and deployment edge, and run
+    browser checks for desktop, tablet, mobile keyboard, and media playback.

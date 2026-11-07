@@ -12,9 +12,10 @@ bandwidth, and storage charges immediately before deployment.
 - The API uses `/api`; Vite proxies API and Socket.IO only during local development.
 - Socket.IO runs in `threading` mode. Connect handlers validate JWTs; conversation
   joins and sends verify membership. Reconnecting clients reload history.
-- Post attachments and avatars used local files. Local disk is ephemeral on many
-  hosts, so the production image selects private S3-compatible storage. Existing
-  files are not migrated by this change.
+- Post attachments, avatars, and conversation media use the local storage adapter
+  in development. Local disk is ephemeral on many hosts, so production uses
+  private S3-compatible storage with separate `posts`, `avatars`, and
+  `conversations` key prefixes. Existing files are not migrated by this change.
 - JWTs are held in `localStorage`. This is vulnerable to token theft after an XSS
   flaw. A future migration can use short-lived access tokens held in memory and
   rotating refresh tokens in `HttpOnly`, `Secure`, `SameSite` cookies, with CSRF
@@ -25,7 +26,8 @@ bandwidth, and storage charges immediately before deployment.
 
 Use a single Render Docker web service to serve the built React app and Flask
 API from one HTTPS origin, Render managed PostgreSQL, and a private Cloudflare R2
-bucket (or another S3-compatible provider) for post media and avatars. The app
+bucket (or another S3-compatible provider) for post media, avatars, and private
+conversation attachments. The app
 origin keeps API, static media routes, and Socket.IO same-origin. The platform
 edge terminates TLS and forwards HTTP plus WebSocket upgrades to the Gunicorn
 port. The app currently runs one Gunicorn worker per instance, so one instance
@@ -47,14 +49,20 @@ flowchart LR
   APP -->|S3 API via boto3| OBJ
 ```
 
-The app enforces existing author and draft-media privacy checks before it reads
-an object. S3 access is server-side using the AWS SDK credential chain; the
+The app enforces author/draft privacy for post media and current conversation
+membership for message media before it reads an object. S3 access is server-side using the AWS SDK credential chain; the
 bucket must not have public-read access. Video/audio response streaming supports
 HTTP byte ranges. The S3 adapter stages deletes with a temporary private object
 so failed database deletion can restore the original. New uploads use the
 selected backend. **Do not switch a live installation from local storage to S3
 until all existing post media and avatars have been migrated and verified.**
 This stage does not migrate, copy, or delete any existing file.
+
+The Flask request body limit is 102 MiB to accommodate one 100 MiB video or a
+conversation message with up to 100 MiB of combined attachments plus multipart
+overhead. Configure the hosting edge to accept at least 102 MiB and verify its
+upload timeout. This repository does not define or control the managed edge
+limit.
 
 ### Socket.IO topology
 
@@ -73,7 +81,9 @@ configure a shared Redis URI before running multiple instances.
 Do not run Alembic as an application import or startup side effect. Take a
 database backup, inspect `flask db history` and the target revision, then run
 `python -m flask --app run db upgrade` once as a release command against the
-target database. Run `flask db check` after upgrade. Do not use `db reset`, drop
+target database. The UI/messaging enhancement adds revision
+`b672a9278ec1` for conversation media and comment likes; it has not been applied
+by this development change. Run `flask db check` after upgrade. Do not use `db reset`, drop
 the database, or point tests at production. The deployment image does not
 include uploaded local files.
 
