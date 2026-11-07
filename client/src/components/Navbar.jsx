@@ -1,7 +1,7 @@
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '../context/AuthContext'
-import { Settings, User as UserIcon, LogIn, PenLine, House, MessageCircle, Search, CircleHelp, Bell, Moon, Type } from 'lucide-react'
+import { Settings, User as UserIcon, LogIn, LogOut, PenLine, House, MessageCircle, Search, CircleHelp, Bell, Moon, Type } from 'lucide-react'
 import { io } from 'socket.io-client'
 import { communityService } from '../services/community'
 import { resolveAssetUrl } from '../services/api'
@@ -15,7 +15,7 @@ const navItems = [
 ]
 
 export default function Navbar() {
-  const { user, isAuthenticated } = useAuth()
+  const { user, isAuthenticated, logout } = useAuth()
   const location = useLocation()
   const navigate = useNavigate()
   const [theme, setTheme] = useState(() => {
@@ -142,6 +142,9 @@ export default function Navbar() {
           <span>Help shape midnight</span>
           <button type="button" onClick={() => { setSettingsOpen(false); window.dispatchEvent(new Event('midnight:open-feedback')); navigate('/about?feedback=1') }}>Send feedback <MessageCircle size={15} /></button>
         </div>
+        {isAuthenticated && <div className="settings-group settings-logout-row">
+          <button type="button" onClick={() => { setSettingsOpen(false); logout(); navigate('/') }}><LogOut size={15} /> Log out</button>
+        </div>}
       </section>}
     </header>
     {!isAuthPage && <aside className="sidebar" aria-label="Main navigation">

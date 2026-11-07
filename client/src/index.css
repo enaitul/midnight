@@ -709,6 +709,7 @@ article .whitespace-pre-wrap { color: var(--soft-ink) !important; }
 .settings-hint { margin: 8px 0 0; color: var(--muted); font-size: 11px; line-height: 1.45; }
 .settings-feedback-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: var(--soft-ink); font-size: 12px; }
 .settings-feedback-row button { display: inline-flex; align-items: center; gap: 7px; min-height: 38px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--page); color: var(--ink); font-size: 12px; cursor: pointer; }
+.settings-logout-row button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; width: 100%; min-height: 40px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--page); color: var(--ink); font-size: 13px; cursor: pointer; }
 :root[data-display-size="small"] { --display-scale: .92; font-size: 15px; }
 :root[data-display-size="standard"] { --display-scale: 1; font-size: 16px; }
 :root[data-display-size="large"] { --display-scale: 1.12; font-size: 18px; }
