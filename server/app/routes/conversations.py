@@ -90,8 +90,12 @@ def send_rest_message(conversation_id):
     has_files = request.mimetype == 'multipart/form-data'
     data = request.form if has_files else (request.get_json(silent=True) or {})
     body = data.get('body', '')
+    reply_to_id = data.get('reply_to_id') or None
+    if reply_to_id is not None:
+        try: reply_to_id = int(reply_to_id)
+        except (TypeError, ValueError): return jsonify({'error': 'Invalid reply target'}), 400
     uploads = request.files.getlist('files') if has_files else []
-    if not isinstance(body, str) or len(body.strip()) > 5000 or (not body.strip() and not uploads):
+    if not isinstance(body, str) or len(body.strip()) > 5000 or (not body.strip() and not uploads and reply_to_id is None):
         return jsonify({'error': 'Messages must contain text or an attachment, with up to 5,000 characters'}), 400
     message = None
     saved = []
@@ -106,6 +110,8 @@ def send_rest_message(conversation_id):
                 clean_name = secure_filename(upload.filename or '')
                 extension = clean_name.rsplit('.', 1)[-1].lower() if '.' in clean_name else ''
                 type_info = MEDIA_TYPES.get(extension)
+                if extension == 'webm' and upload.mimetype == 'audio/webm':
+                    type_info = ('audio', 'audio/webm', {'audio/webm'}, None)
                 if not clean_name or not type_info:
                     raise ValueError('Supported formats: JPEG, PNG, WebP, MP3, WAV, OGG, M4A, MP4, and WebM')
                 media_type, canonical_mime, accepted_mimes, image_format = type_info
@@ -127,7 +133,10 @@ def send_rest_message(conversation_id):
                 storage.save(filename, content, canonical_mime)
                 saved.append(filename)
                 media_rows.append((filename, clean_name[:255], media_type, canonical_mime, len(content)))
-            message = Message(conversation_id=conversation_id, sender_id=g.current_user.id, body=body.strip())
+            reply = db.session.get(Message, reply_to_id) if reply_to_id is not None else None
+            if reply_to_id is not None and (not reply or reply.conversation_id != conversation_id):
+                raise ValueError('Reply target was not found in this conversation')
+            message = Message(conversation_id=conversation_id, sender_id=g.current_user.id, body=body.strip(), reply_to=reply)
             db.session.add(message)
             db.session.flush()
             db.session.add_all(MessageMedia(message_id=message.id, filename=filename, original_name=name,
@@ -147,7 +156,7 @@ def send_rest_message(conversation_id):
                 except Exception: current_app.logger.exception('Could not clean up conversation media after database failure')
             raise
     else:
-        result = add_message(conversation_id, g.current_user.id, body)
+        result = add_message(conversation_id, g.current_user.id, body, reply_to_id)
         if len(result) == 3:
             _, error, status = result
             return jsonify({'error': error}), status

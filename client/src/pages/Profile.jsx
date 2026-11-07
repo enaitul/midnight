@@ -6,6 +6,7 @@ import { communityService } from '../services/community'
 import FollowButton from '../components/FollowButton'
 import PostMediaDisplay from '../components/PostMediaDisplay'
 import { resolveAssetUrl } from '../services/api'
+import InstagramIcon from '../components/InstagramIcon'
 
 export default function Profile() {
   const { username } = useParams()
@@ -38,7 +39,7 @@ export default function Profile() {
   const update = (key, value) => setProfile(current => ({ ...current, [key]: value }))
   const saveProfile = async event => {
     event.preventDefault(); setSaving(true); setError('')
-    try { setProfile(await communityService.updateProfile({ display_name: profile.display_name, biography: profile.biography || '', age: profile.age === '' ? null : Number(profile.age), age_public: profile.age_public })); await refreshUser(); setEditing(false) }
+    try { setProfile(await communityService.updateProfile({ display_name: profile.display_name, biography: profile.biography || '', instagram_url: profile.instagram_url || '', age: profile.age === '' ? null : Number(profile.age), age_public: profile.age_public })); await refreshUser(); setEditing(false) }
     catch (err) { setError(err.response?.data?.error || 'Profile could not be saved.') }
     finally { setSaving(false) }
   }
@@ -67,11 +68,13 @@ export default function Profile() {
     {editing ? <form className="profile-form" onSubmit={saveProfile}>
       <label>Display name<input value={profile.display_name || ''} onChange={event => update('display_name', event.target.value)} maxLength={100} required /></label>
       <label>Biography<textarea value={profile.biography || ''} onChange={event => update('biography', event.target.value)} maxLength={500} rows={4} placeholder="A few words about you" /></label>
+      <label>Instagram link <span className="field-note">Optional</span><input type="url" value={profile.instagram_url || ''} onChange={event => update('instagram_url', event.target.value)} maxLength={2048} placeholder="https://www.instagram.com/username/" /></label>
       <label>Age <span className="field-note">Optional</span><input type="number" min="0" max="130" value={profile.age ?? ''} onChange={event => update('age', event.target.value)} /></label>
       <label className="privacy-check"><input type="checkbox" checked={Boolean(profile.age_public)} onChange={event => update('age_public', event.target.checked)} /> Show my age on my public profile</label>
       <button className="primary-action" disabled={saving}>{saving ? 'Saving…' : 'Save profile'}</button>
     </form> : <div className="profile-bio">
       {profile.biography ? <p>{profile.biography}</p> : ownPage ? <p>Your biography is still unwritten.</p> : null}
+      {profile.instagram_url && <a className="profile-social-link" href={profile.instagram_url} target="_blank" rel="noreferrer noopener" aria-label={`${profile.display_name || profile.username} on Instagram`}><InstagramIcon size={17} /> Instagram</a>}
       {profile.age !== undefined && profile.age !== null && <p className="profile-age">Age {profile.age}</p>}
       {profile.created_at && <p className="profile-created">Member since {new Date(profile.created_at).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</p>}
       {ownPage && profile.email && <p className="profile-private">Private email · {profile.email}</p>}

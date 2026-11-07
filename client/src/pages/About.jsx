@@ -12,7 +12,7 @@ const FEEDBACK_FORM_FIELDS = {
 }
 
 export default function About() {
-  const [feedbackOpen, setFeedbackOpen] = useState(false)
+  const [feedbackOpen, setFeedbackOpen] = useState(() => new URLSearchParams(window.location.search).get('feedback') === '1')
   const [feedback, setFeedback] = useState({ name: '', email: '', rating: '', message: '' })
   const [feedbackSubmitted, setFeedbackSubmitted] = useState(false)
   const [feedbackSubmitting, setFeedbackSubmitting] = useState(false)
@@ -25,6 +25,12 @@ export default function About() {
     window.addEventListener('keydown', closeOnEscape)
     return () => window.removeEventListener('keydown', closeOnEscape)
   }, [feedbackOpen])
+
+  useEffect(() => {
+    const openFeedback = () => setFeedbackOpen(true)
+    window.addEventListener('midnight:open-feedback', openFeedback)
+    return () => window.removeEventListener('midnight:open-feedback', openFeedback)
+  }, [])
 
   const updateFeedback = (field, value) => {
     setFeedback(current => ({ ...current, [field]: value }))

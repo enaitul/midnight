@@ -28,14 +28,19 @@ def emit_to_user(user_id, event, payload):
         current_app.logger.exception('Realtime event delivery failed after account data was saved')
 
 
-def add_message(conversation_id, sender_id, body):
-    if not isinstance(body, str) or not body.strip():
+def add_message(conversation_id, sender_id, body, reply_to_id=None):
+    if reply_to_id is not None and (isinstance(reply_to_id, bool) or not isinstance(reply_to_id, int)):
+        return None, 'Invalid reply target'
+    if not isinstance(body, str) or (not body.strip() and reply_to_id is None):
         return None, 'Message cannot be empty'
     if len(body.strip()) > 5000:
         return None, 'Messages must be 5,000 characters or fewer'
     if not membership(conversation_id, sender_id):
         return None, 'Conversation not found', 404
-    message = Message(conversation_id=conversation_id, sender_id=sender_id, body=body.strip())
+    reply = db.session.get(Message, reply_to_id) if reply_to_id is not None else None
+    if reply_to_id is not None and (not reply or reply.conversation_id != conversation_id):
+        return None, 'Reply target was not found in this conversation'
+    message = Message(conversation_id=conversation_id, sender_id=sender_id, body=body.strip(), reply_to=reply)
     db.session.add(message)
     db.session.commit()
     return message, None
@@ -46,6 +51,9 @@ def message_dict(message):
         'id': message.id,
         'conversation_id': message.conversation_id,
         'body': message.body,
+        'reply_to': ({'id': message.reply_to.id, 'body': message.reply_to.body,
+                      'sender': message.reply_to.sender.display_name or message.reply_to.sender.username}
+                     if message.reply_to else None),
         'created_at': message.created_at.isoformat(),
         'media': [item.to_dict() for item in message.media],
         'sender': {
@@ -76,7 +84,8 @@ def conversation_dict(conversation, viewer_id, include_last_message=True):
         'created_at': conversation.created_at.isoformat(),
         'participants': [
             {'id': p.user_id, 'username': p.user.username, 'display_name': p.user.display_name or p.user.username,
-             'avatar_url': p.user.avatar_url, 'role': p.role}
+             'avatar_url': p.user.avatar_url, 'biography': p.user.biography,
+             'instagram_url': p.user.instagram_url, 'role': p.role}
             for p in participants
         ],
         'last_message': message_dict(last_message) if include_last_message and last_message else None,

@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { io } from 'socket.io-client'
-import { ArrowLeft, Check, Edit2, Loader, MessageCircle, Plus, Search, Send, Smile, Paperclip, Users, X } from 'lucide-react'
+import { ArrowLeft, Check, Edit2, Loader, MessageCircle, Plus, Search, Send, Smile, Paperclip, Users, X, Mic, Reply } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { communityService } from '../services/community'
 import { findUserSearchResult, getUserSearchResults } from '../services/searchResults'
 import api, { resolveAssetUrl } from '../services/api'
+import InstagramIcon from '../components/InstagramIcon'
 
 const EMOJI_CATEGORIES = [
   { name: 'Smileys', icon: '☺', items: [['😀','grinning'],['😃','smile'],['😄','happy'],['😁','beaming'],['😆','laugh'],['🥹','holding back tears'],['😊','blush'],['🙂','slight smile'],['🙃','upside down'],['😉','wink'],['😍','heart eyes'],['🥰','hearts'],['😘','kiss'],['😋','tasty'],['😎','cool'],['🤔','thinking'],['🤗','hug'],['🥳','party'],['😭','cry'],['😂','tears joy'],['😅','sweat'],['😴','sleep'],['😌','relieved'],['😇','angel'],['🤍','white heart'],['❤️','red heart'],['🫶','heart hands'],['💔','broken heart'],['🙏','thanks please'],['👏','clap']] },
@@ -18,7 +19,7 @@ const EMOJI_CATEGORIES = [
   { name: 'Flags', icon: '⚑', items: [['🏳️','white flag'],['🏴','black flag'],['🏁','checkered'],['🚩','triangular'],['🇺🇸','United States'],['🇬🇧','United Kingdom'],['🇨🇦','Canada'],['🇦🇺','Australia'],['🇮🇳','India'],['🇧🇩','Bangladesh'],['🇯🇵','Japan'],['🇰🇷','South Korea'],['🇫🇷','France'],['🇩🇪','Germany'],['🇮🇹','Italy'],['🇧🇷','Brazil'],['🇲🇽','Mexico'],['🇳🇬','Nigeria'],['🇿🇦','South Africa'],['🇵🇸','Palestine']] },
 ]
 const MESSAGE_MEDIA_LIMITS = { image: 10, video: 100, audio: 25 }
-const MESSAGE_MEDIA_TYPES = { 'image/jpeg': 'image', 'image/png': 'image', 'image/webp': 'image', 'video/mp4': 'video', 'video/webm': 'video', 'audio/mpeg': 'audio', 'audio/mp3': 'audio', 'audio/wav': 'audio', 'audio/x-wav': 'audio', 'audio/ogg': 'audio', 'audio/mp4': 'audio', 'audio/x-m4a': 'audio' }
+const MESSAGE_MEDIA_TYPES = { 'image/jpeg': 'image', 'image/png': 'image', 'image/webp': 'image', 'video/mp4': 'video', 'video/webm': 'video', 'audio/mpeg': 'audio', 'audio/mp3': 'audio', 'audio/wav': 'audio', 'audio/x-wav': 'audio', 'audio/ogg': 'audio', 'audio/mp4': 'audio', 'audio/x-m4a': 'audio', 'audio/webm': 'audio' }
 
 const dayKey = value => {
   const date = new Date(value)
@@ -52,7 +53,7 @@ function SharedMessageMedia({ item }) {
     const load = () => {
       if (requestedRef.current) return
       requestedRef.current = true
-      api.get(item.url, { responseType: 'blob' }).then(response => {
+      api.get(resolveAssetUrl(item.url), { responseType: 'blob' }).then(response => {
         objectUrl = URL.createObjectURL(response.data)
         if (cancelledRef.current) { URL.revokeObjectURL(objectUrl); return }
         setUrl(objectUrl)
@@ -95,14 +96,17 @@ export default function Messages() {
   const [editingName, setEditingName] = useState(false)
   const [renameInput, setRenameInput] = useState('')
   const [sending, setSending] = useState(false)
-  const [socketConnected, setSocketConnected] = useState(false)
-  const [newMessageCount, setNewMessageCount] = useState(0)
-  const [newMessageSender, setNewMessageSender] = useState('')
   const [emojiOpen, setEmojiOpen] = useState(false)
   const [emojiCategory, setEmojiCategory] = useState(0)
   const [emojiSearch, setEmojiSearch] = useState('')
   const [attachments, setAttachments] = useState([])
   const [uploadProgress, setUploadProgress] = useState(0)
+  const [replyTo, setReplyTo] = useState(null)
+  const [typingName, setTypingName] = useState('')
+  const [recording, setRecording] = useState(false)
+  const [recordingSeconds, setRecordingSeconds] = useState(0)
+  const [pullingMessageId, setPullingMessageId] = useState(null)
+  const [pullOffset, setPullOffset] = useState(0)
   const [historyHasMore, setHistoryHasMore] = useState(false)
   const [loadingOlder, setLoadingOlder] = useState(false)
   const [floatingDate, setFloatingDate] = useState('')
@@ -117,6 +121,17 @@ export default function Messages() {
   const scrollBottomRef = useRef(true)
   const floatDateTimerRef = useRef(null)
   const attachmentsRef = useRef([])
+  const typingTimerRef = useRef(null)
+  const typingExpiryRef = useRef(null)
+  const recorderRef = useRef(null)
+  const recordedChunksRef = useRef([])
+  const messagePointerRef = useRef(null)
+  const suppressRecordClickRef = useRef(false)
+  const recordHoldTimerRef = useRef(null)
+  const holdStartedRef = useRef(false)
+  const recordingIntervalRef = useRef(null)
+  const recordingPendingRef = useRef(false)
+  const stopWhenReadyRef = useRef(false)
   const token = localStorage.getItem('midnight_token')
 
   const clearComposer = useCallback(() => {
@@ -125,6 +140,7 @@ export default function Messages() {
     attachmentsRef.current = []
     setAttachments([])
     setMessageBody('')
+    setReplyTo(null)
     setEmojiOpen(false)
   }, [])
 
@@ -170,8 +186,6 @@ export default function Messages() {
     }
     const incoming = message.sender.id !== user?.id
     if (incoming && message.conversation_id === activeIdRef.current) {
-      setNewMessageCount(count => count + 1)
-      setNewMessageSender(message.sender.display_name)
       communityService.markRead(message.conversation_id).then(() => window.dispatchEvent(new CustomEvent('midnight:conversation-read', { detail: { id: message.conversation_id } }))).catch(() => {})
     }
     setConversations(current => {
@@ -186,14 +200,14 @@ export default function Messages() {
 
   const openConversation = item => {
     clearComposer()
-    setNewMessageCount(item.unread_count || 0)
-    setNewMessageSender(item.title || item.name || 'your conversation')
     setConversations(current => current.map(conversation => conversation.id === item.id ? { ...conversation, unread_count: 0 } : conversation))
     setActiveId(item.id)
   }
 
   useEffect(() => {
     if (!activeId || !isAuthenticated) return
+    setTypingName('')
+    window.clearTimeout(typingExpiryRef.current)
     const alive = { current: true }
     setMessages([]); setActiveConversation(null); setError('')
     Promise.all([communityService.conversation(activeId), communityService.messages(activeId), communityService.markRead(activeId)])
@@ -218,7 +232,6 @@ export default function Messages() {
       }
     })
     socket.on('connect', () => {
-      setSocketConnected(true)
       joinedRoomsRef.current.clear()
       joinKnownConversations()
       const conversationId = activeIdRef.current
@@ -238,9 +251,14 @@ export default function Messages() {
           .catch(() => setError('Unread messages could not be marked as read.'))
       }
     })
-    socket.on('disconnect', () => { setSocketConnected(false); joinedRoomsRef.current.clear() })
-    socket.on('connect_error', () => setSocketConnected(false))
+    socket.on('disconnect', () => { joinedRoomsRef.current.clear() })
     socket.on('new_message', receiveMessage)
+    socket.on('typing', payload => {
+      if (payload.conversation_id !== activeIdRef.current || payload.user_id === user?.id) return
+      setTypingName(payload.is_typing ? payload.display_name : '')
+      window.clearTimeout(typingExpiryRef.current)
+      if (payload.is_typing) typingExpiryRef.current = window.setTimeout(() => setTypingName(''), 2600)
+    })
     socket.on('conversation_updated', conversation => {
       loadConversations()
       if (activeIdRef.current === conversation.id) setActiveConversation(conversation)
@@ -249,8 +267,8 @@ export default function Messages() {
       setConversations(current => current.filter(item => item.id !== conversationId))
       if (activeIdRef.current === conversationId) { clearComposer(); setActiveId(null); setActiveConversation(null); setMessages([]) }
     })
-    return () => { socket.disconnect(); socketRef.current = null; joinedRoomsRef.current.clear(); setSocketConnected(false) }
-  }, [isAuthenticated, token, receiveMessage, loadConversations, clearComposer])
+    return () => { socket.disconnect(); socketRef.current = null; joinedRoomsRef.current.clear() }
+  }, [isAuthenticated, token, receiveMessage, loadConversations, clearComposer, user?.id])
 
   useEffect(() => {
     if (socketRef.current?.connected) conversations.forEach(item => {
@@ -261,10 +279,14 @@ export default function Messages() {
     })
   }, [conversations])
 
-  useEffect(() => { if (scrollBottomRef.current) bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
+  useEffect(() => {
+    const history = historyRef.current
+    if (scrollBottomRef.current && history) history.scrollTo({ top: history.scrollHeight, behavior: 'smooth' })
+  }, [messages])
   useEffect(() => () => {
     attachmentsRef.current.forEach(item => URL.revokeObjectURL(item.preview))
     window.clearTimeout(floatDateTimerRef.current)
+    window.clearInterval(recordingIntervalRef.current)
   }, [])
 
   useEffect(() => {
@@ -284,35 +306,156 @@ export default function Messages() {
   const send = async event => {
     event.preventDefault()
     const body = messageBody.trim()
-    if ((!body && !attachments.length) || !activeId || sending) return
+    if ((!body && !attachments.length && !replyTo) || !activeId || sending) return
     setSending(true); setError(''); setUploadProgress(0)
     try {
       if (attachments.length) {
-        const result = await communityService.sendMessageWithMedia(activeId, body, attachments.map(item => item.file), setUploadProgress)
+        const result = await communityService.sendMessageWithMedia(activeId, body, attachments.map(item => item.file), setUploadProgress, replyTo?.id)
         receiveMessage(result.message)
         attachments.forEach(item => URL.revokeObjectURL(item.preview))
         attachmentsRef.current = []
-        setAttachments([]); setMessageBody(''); setEmojiOpen(false); setUploadProgress(0); setSending(false)
+        setAttachments([]); setMessageBody(''); setReplyTo(null); setEmojiOpen(false); setUploadProgress(0); setSending(false)
         return
       }
       const socket = socketRef.current
       if (socket?.connected) {
-        socket.timeout(10000).emit('send_message', { conversation_id: activeId, body }, (timeoutError, result) => {
+        socket.timeout(10000).emit('send_message', { conversation_id: activeId, body, reply_to_id: replyTo?.id }, (timeoutError, result) => {
           if (timeoutError) {
             setError('Delivery could not be confirmed. Checking the saved conversation history…')
             communityService.messages(activeId)
               .then(history => setMessages(history.messages))
               .catch(() => setError('Connection interrupted. Reopen the conversation to check delivery.'))
           } else if (!result?.ok) setError(result?.error || 'Message was not sent.')
-          else { receiveMessage(result.message); setMessageBody('') }
+          else { receiveMessage(result.message); setMessageBody(''); setReplyTo(null) }
           setSending(false)
         })
       } else {
-        const { message } = await communityService.sendMessage(activeId, body)
-        receiveMessage(message); setMessageBody(''); setSending(false)
+        const { message } = await communityService.sendMessage(activeId, body, replyTo?.id)
+        receiveMessage(message); setMessageBody(''); setReplyTo(null); setSending(false)
       }
     } catch (err) { setError(err.response?.data?.error || 'Message was not sent.'); setSending(false) }
   }
+
+  const emitTyping = value => {
+    if (activeId && socketRef.current?.connected) socketRef.current.emit('typing', { conversation_id: activeId, is_typing: value })
+  }
+
+  const startRecording = async () => {
+    if (recording || recordingPendingRef.current || !navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
+      if (!navigator.mediaDevices?.getUserMedia) setError('Voice recording is not available in this browser or connection.')
+      return
+    }
+    try {
+      recordingPendingRef.current = true
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const mimeType = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'].find(type => MediaRecorder.isTypeSupported(type))
+      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined)
+      recordedChunksRef.current = []
+      recorder.ondataavailable = event => { if (event.data.size) recordedChunksRef.current.push(event.data) }
+      recorder.onstop = () => {
+        stream.getTracks().forEach(track => track.stop())
+        window.clearInterval(recordingIntervalRef.current)
+        const recordedType = recorder.mimeType || mimeType || 'audio/webm'
+        const blob = new Blob(recordedChunksRef.current, { type: recordedType })
+        if (blob.size) {
+          const extension = recordedType.includes('mp4') ? 'm4a' : 'webm'
+          const file = new File([blob], `voice-note-${Date.now()}.${extension}`, { type: recordedType })
+          const next = [...attachmentsRef.current, { file, mediaType: 'audio', preview: URL.createObjectURL(file), key: crypto.randomUUID() }].slice(0, 4)
+          attachmentsRef.current = next; setAttachments(next)
+        }
+        setRecording(false)
+      }
+      recorderRef.current = recorder
+      recorder.start(); recordingPendingRef.current = false; setRecording(true); setRecordingSeconds(0); setError('')
+      const recordingStartedAt = Date.now()
+      recordingIntervalRef.current = window.setInterval(() => setRecordingSeconds(Math.floor((Date.now() - recordingStartedAt) / 1000)), 1000)
+      if (stopWhenReadyRef.current) { stopWhenReadyRef.current = false; recorder.stop() }
+    } catch { recordingPendingRef.current = false; stopWhenReadyRef.current = false; setError('Allow microphone access to record a voice note.') }
+  }
+
+  const stopRecording = () => {
+    if (recorderRef.current?.state === 'recording') recorderRef.current.stop()
+    else if (recordingPendingRef.current) stopWhenReadyRef.current = true
+  }
+  const onRecordPointerDown = event => {
+    event.currentTarget.setPointerCapture?.(event.pointerId)
+    holdStartedRef.current = false
+    recordHoldTimerRef.current = window.setTimeout(() => { holdStartedRef.current = true; startRecording() }, 260)
+  }
+
+  const onRecordPointerUp = () => {
+    window.clearTimeout(recordHoldTimerRef.current)
+    if (holdStartedRef.current) {
+      suppressRecordClickRef.current = true
+      window.setTimeout(() => { suppressRecordClickRef.current = false }, 350)
+      stopRecording()
+    }
+  }
+
+  const beginMessagePull = (message, event) => {
+    if (event.button !== undefined && event.button !== 0) return
+    if (event.target.closest('a, button, input, textarea, audio, video')) return
+    const gesture = { message, pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, moved: false, longPressed: false, timer: null }
+    messagePointerRef.current = gesture
+    event.currentTarget.setPointerCapture?.(event.pointerId)
+    if (event.pointerType === 'touch') {
+      gesture.timer = window.setTimeout(() => {
+        if (messagePointerRef.current !== gesture || gesture.moved) return
+        gesture.longPressed = true
+        setPullingMessageId(message.id)
+        setPullOffset(62)
+        window.setTimeout(() => { setReplyTo(message); inputRef.current?.focus() }, 170)
+      }, 480)
+    }
+  }
+
+  const moveMessagePull = event => {
+    const gesture = messagePointerRef.current
+    if (!gesture || gesture.pointerId !== event.pointerId || gesture.longPressed) return
+    const deltaX = event.clientX - gesture.startX
+    const deltaY = event.clientY - gesture.startY
+    if (Math.abs(deltaY) > 18 && Math.abs(deltaY) > Math.abs(deltaX)) {
+      gesture.moved = true
+      window.clearTimeout(gesture.timer)
+      return
+    }
+    if (deltaX <= 0 || Math.abs(deltaX) < 5 || Math.abs(deltaY) > 48) return
+    gesture.moved = true
+    window.clearTimeout(gesture.timer)
+    setPullingMessageId(gesture.message.id)
+    setPullOffset(Math.min(deltaX * 0.82, 76))
+  }
+
+  const finishMessagePull = (event, cancelled = false) => {
+    const gesture = messagePointerRef.current
+    if (!gesture || gesture.pointerId !== event.pointerId) return
+    messagePointerRef.current = null
+    window.clearTimeout(gesture.timer)
+    const deltaX = event.clientX - gesture.startX
+    const deltaY = event.clientY - gesture.startY
+    const shouldReply = !cancelled && (gesture.longPressed || (deltaX > 66 && Math.abs(deltaY) < 48))
+    setPullOffset(0)
+    window.setTimeout(() => setPullingMessageId(current => current === gesture.message.id ? null : current), 190)
+    if (shouldReply) {
+      setReplyTo(gesture.message)
+      inputRef.current?.focus()
+    }
+  }
+
+  const replyToMessage = message => {
+    setReplyTo(message)
+    inputRef.current?.focus()
+  }
+
+  useEffect(() => {
+    const viewport = window.visualViewport
+    if (!viewport) return undefined
+    const syncViewport = () => document.documentElement.style.setProperty('--chat-viewport-height', `${viewport.height}px`)
+    syncViewport()
+    viewport.addEventListener('resize', syncViewport)
+    viewport.addEventListener('scroll', syncViewport)
+    return () => { viewport.removeEventListener('resize', syncViewport); viewport.removeEventListener('scroll', syncViewport); document.documentElement.style.removeProperty('--chat-viewport-height') }
+  }, [])
 
   const addAttachments = event => {
     const files = Array.from(event.target.files || [])
@@ -378,13 +521,16 @@ export default function Messages() {
   const handleHistoryScroll = event => {
     const history = event.currentTarget
     scrollBottomRef.current = history.scrollHeight - history.scrollTop - history.clientHeight < 100
-    const visible = [...history.querySelectorAll('[data-message-date]')].find(element => element.offsetTop >= history.scrollTop + 40)
+    const dateLine = history.getBoundingClientRect().top + 52
+    const visible = [...history.querySelectorAll('[data-message-date]')]
+      .find(element => element.getBoundingClientRect().bottom > dateLine)
     if (visible) {
-      setFloatingDate(visible.dataset.dateLabel)
+      const nextDate = visible.dataset.dateLabel
+      setFloatingDate(current => current === nextDate ? current : nextDate)
       setShowFloatingDate(true)
     }
     window.clearTimeout(floatDateTimerRef.current)
-    floatDateTimerRef.current = window.setTimeout(() => setShowFloatingDate(false), 1800)
+    floatDateTimerRef.current = window.setTimeout(() => setShowFloatingDate(false), 2200)
     if (history.scrollTop < 70 && historyHasMore) loadOlderMessages()
   }
 
@@ -442,7 +588,7 @@ export default function Messages() {
           {directPerson && <Link className="thread-profile-avatar" to={`/profile/${encodeURIComponent(directPerson.username)}`} aria-label={`View ${directPerson.display_name}'s profile`}>
             {directPerson.avatar_url ? <img className="thread-avatar" src={resolveAssetUrl(directPerson.avatar_url)} alt="" referrerPolicy="no-referrer" /> : <span className="thread-avatar thread-avatar-fallback">{(directPerson.display_name || '?').slice(0, 1).toUpperCase()}</span>}
           </Link>}
-          <div>
+          <div className="thread-person-copy">
             {editingName ? (
               <form onSubmit={saveGroupName} className="flex items-center gap-1.5">
                 <input
@@ -472,9 +618,9 @@ export default function Messages() {
                 )}
               </div>
             )}
-            <small>{socketConnected ? 'Connected' : 'Messages stay saved while you reconnect'}</small>
+            <small className="thread-bio">{directPerson?.biography?.trim() || (activeConversation?.kind === 'group' ? 'Group conversation' : 'No bio added yet')}</small>
           </div>
-          {newMessageCount > 0 && <span className="thread-new-badge">{newMessageCount} new{newMessageSender ? ` · ${newMessageSender}` : ''}</span>}
+          {directPerson?.instagram_url && <a className="thread-instagram-link" href={directPerson.instagram_url} target="_blank" rel="noreferrer noopener" aria-label={`${directPerson.display_name}'s Instagram profile`} title="Open Instagram profile"><InstagramIcon size={20} /></a>}
           {activeConversation?.kind === 'group' && <span className="participants-count"><Users size={15} /> {activeConversation.participants.length}</span>}
         </header>
         {activeConversation?.kind === 'group' && <div className="group-members">{activeConversation.participants.map(person => <span key={person.id}><Link to={`/profile/${encodeURIComponent(person.username)}`}>{person.display_name}</Link>{activeRole === 'admin' && person.id !== user?.id && <button onClick={() => removeMember(person)} aria-label={`Remove ${person.display_name}`}><X size={12} /></button>}</span>)}{activeRole === 'admin' && <div className="member-add"><input value={personQuery} onChange={e => setPersonQuery(e.target.value)} placeholder="Add a member" />{people.filter(p => !activeConversation.participants.some(m => m.id === p.id)).map(person => <button key={person.id} onClick={() => manageMember(person)}>{person.display_name} <Plus size={13} /></button>)}</div>}<button className="text-action" onClick={leaveGroup}>Leave group</button></div>}
@@ -496,11 +642,13 @@ export default function Messages() {
             </Link> : <span className="message-avatar-spacer" />
             return <div className="message-day-group" key={message.id}>
               {startsDay && <div className="chat-date-separator"><span>{dayLabel(message.created_at)}</span></div>}
-              <article className={`chat-message${mine ? ' mine' : ''}${startsGroup ? ' group-start' : ''}${endsGroup ? ' group-end' : ''}`} data-message-date={dayKey(message.created_at)} data-date-label={dayLabel(message.created_at)}>
+              <article className={`chat-message${mine ? ' mine' : ''}${startsGroup ? ' group-start' : ''}${endsGroup ? ' group-end' : ''}${pullingMessageId === message.id ? ' is-pulling' : ''}`} style={pullingMessageId === message.id ? { transform: `translateX(${pullOffset}px)` } : undefined} data-message-date={dayKey(message.created_at)} data-date-label={dayLabel(message.created_at)} onPointerDown={event => beginMessagePull(message, event)} onPointerMove={moveMessagePull} onPointerUp={event => finishMessagePull(event)} onPointerCancel={event => finishMessagePull(event, true)}>
                 {!mine && avatar}
                 <div className="chat-message-stack">
                   {activeConversation?.kind === 'group' && startsGroup && <Link className="chat-sender-name" to={`/profile/${encodeURIComponent(message.sender.username)}`}>{mine ? 'You' : message.sender.display_name}</Link>}
                   <div className="chat-bubble">
+                    <button type="button" className="message-reply-button" aria-label={`Reply to ${message.sender.display_name}'s message`} title="Reply to message" onClick={event => { event.stopPropagation(); replyToMessage(message) }}><Reply size={16} /></button>
+                    {message.reply_to && <div className="reply-quote"><strong>{message.reply_to.sender}</strong><span>{message.reply_to.body || 'Attachment'}</span></div>}
                     {message.body && <p>{messageLinks(message.body)}</p>}
                     {!!media.length && <div className="message-media-list">{media.map(item => <SharedMessageMedia item={item} key={item.id} />)}</div>}
                     <time dateTime={message.created_at}>{new Date(message.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</time>
@@ -510,10 +658,12 @@ export default function Messages() {
               </article>
             </div>
           })}
+          {typingName && <div className="typing-indicator" aria-live="polite"><span className="typing-dots"><i /><i /><i /></span>{typingName} is typing</div>}
           <div ref={bottomRef} />
         </div>
         {error && <p className="inline-error messages-thread-error">{error}</p>}
         <div className="message-composer-wrap">
+          {replyTo && <div className="reply-preview"><Reply size={16} /><span><strong>Replying to {replyTo.sender.id === user?.id ? 'yourself' : replyTo.sender.display_name}</strong><small>{replyTo.body || 'Attachment'}</small></span><button type="button" onClick={() => setReplyTo(null)} aria-label="Cancel reply"><X size={17} /></button></div>}
           {emojiOpen && <div className="emoji-picker" role="dialog" aria-label="Choose an emoji">
             <label className="emoji-search"><Search size={15} /><input value={emojiSearch} onChange={event => setEmojiSearch(event.target.value)} placeholder="Search emoji" aria-label="Search emoji" /></label>
             {!emojiSearch && <nav className="emoji-categories" aria-label="Emoji categories">{EMOJI_CATEGORIES.map((category, index) => <button type="button" key={category.name} className={emojiCategory === index ? 'active' : ''} onClick={() => setEmojiCategory(index)} title={category.name} aria-label={category.name}>{category.icon}</button>)}</nav>}
@@ -525,11 +675,13 @@ export default function Messages() {
             <figcaption>{item.file.name}</figcaption><button type="button" onClick={() => removeAttachment(item.key)} disabled={sending} aria-label={`Remove ${item.file.name}`}><X size={14} /></button>
           </figure>)}</div>}
           {sending && attachments.length > 0 && <div className="message-upload-progress" role="status"><span>Uploading attachments</span><progress value={uploadProgress} max="100" /><small>{uploadProgress}%</small></div>}
+          {recording && <div className="voice-recording-status" role="status" aria-live="polite"><span className="voice-recording-dot" /><span>Recording</span><span className="voice-recording-wave" aria-hidden="true">{[0, 1, 2, 3, 4, 5, 6].map(index => <i key={index} />)}</span><time>{String(Math.floor(recordingSeconds / 60)).padStart(2, '0')}:{String(recordingSeconds % 60).padStart(2, '0')}</time></div>}
           <form className="message-composer" onSubmit={send}>
             <button className={`composer-emoji-button${emojiOpen ? ' active' : ''}`} type="button" onClick={() => setEmojiOpen(open => !open)} aria-label="Choose emoji" aria-expanded={emojiOpen}><Smile size={20} /></button>
-            <label className="composer-attach-button" title="Attach photos, videos, or audio"><Paperclip size={19} /><input type="file" accept="image/jpeg,image/png,image/webp,video/mp4,video/webm,audio/mpeg,audio/wav,audio/ogg,audio/mp4,audio/x-m4a" multiple disabled={sending || attachments.length >= 4} onChange={addAttachments} aria-label="Attach media" /></label>
-            <textarea ref={inputRef} value={messageBody} onChange={event => setMessageBody(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit() } }} maxLength={5000} placeholder="Write a message…" aria-label="Write a message" rows={1} />
-            <button className="composer-send-button" type="submit" disabled={sending || (!messageBody.trim() && !attachments.length)} aria-label="Send message">{sending ? <Loader size={17} className="animate-spin" /> : <Send size={17} />}</button>
+            <label className="composer-attach-button" title="Attach photos, videos, or audio"><Paperclip size={19} /><input type="file" accept="image/jpeg,image/png,image/webp,video/mp4,video/webm,audio/mpeg,audio/wav,audio/ogg,audio/mp4,audio/x-m4a,audio/webm" multiple disabled={sending || attachments.length >= 4} onChange={addAttachments} aria-label="Attach media" /></label>
+            <textarea ref={inputRef} value={messageBody} onChange={event => { setMessageBody(event.target.value); emitTyping(true); window.clearTimeout(typingTimerRef.current); typingTimerRef.current = window.setTimeout(() => emitTyping(false), 1100) }} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit() } }} maxLength={5000} placeholder="Write a message…" aria-label="Write a message" rows={1} />
+            <button className={`composer-voice-button${recording ? ' recording' : ''}`} type="button" aria-label={recording ? 'Stop recording voice note' : 'Record voice note'} title={recording ? 'Tap to finish recording' : 'Hold or tap to record a voice note'} onPointerDown={onRecordPointerDown} onPointerUp={onRecordPointerUp} onPointerCancel={onRecordPointerUp} onClick={() => { if (suppressRecordClickRef.current) return; if (recording) stopRecording(); else startRecording() }}><Mic size={21} /></button>
+            <button className="composer-send-button" type="submit" disabled={sending || (!messageBody.trim() && !attachments.length && !replyTo)} aria-label="Send message">{sending ? <Loader size={17} className="animate-spin" /> : <Send size={17} />}</button>
           </form>
         </div>
       </>}

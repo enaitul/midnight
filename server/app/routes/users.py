@@ -1,5 +1,6 @@
 import os
 import uuid
+from urllib.parse import urlparse
 from flask import Blueprint, current_app, g, jsonify, request, send_from_directory, Response, stream_with_context
 from PIL import Image, UnidentifiedImageError
 from app import db
@@ -103,6 +104,7 @@ def update_my_profile():
     data = request.get_json(silent=True) or {}
     display_name = data.get('display_name')
     biography = data.get('biography')
+    instagram_url = data.get('instagram_url')
     age = data.get('age')
     age_public = data.get('age_public')
 
@@ -120,6 +122,26 @@ def update_my_profile():
         if len(biography) > 500:
             return jsonify({'error': 'Biography must be 500 characters or fewer'}), 400
         g.current_user.biography = biography or None
+    if 'instagram_url' in data:
+        if not isinstance(instagram_url, str):
+            return jsonify({'error': 'Instagram link must be text'}), 400
+        instagram_url = instagram_url.strip()
+        if instagram_url:
+            try:
+                parsed_url = urlparse(instagram_url)
+                valid_instagram_url = (
+                    parsed_url.scheme == 'https'
+                    and parsed_url.hostname in {'instagram.com', 'www.instagram.com'}
+                    and bool(parsed_url.path.strip('/'))
+                    and not parsed_url.username
+                    and not parsed_url.password
+                    and len(instagram_url) <= 2048
+                )
+            except ValueError:
+                valid_instagram_url = False
+            if not valid_instagram_url:
+                return jsonify({'error': 'Enter a full Instagram profile link, such as https://www.instagram.com/username/'}), 400
+        g.current_user.instagram_url = instagram_url or None
     if 'age' in data:
         if age in ('', None):
             g.current_user.age = None

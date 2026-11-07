@@ -338,6 +338,33 @@ def test_list_conversations_serializes_direct_group_unread_and_empty_results(app
     assert [message['body'] for message in history.get_json()['messages']] == ['A group note']
 
 
+def test_message_reply_and_recorded_voice_attachment_round_trip(app, users):
+    client = app.test_client()
+    alice_headers = auth(users['alice']['token'])
+    with app.app_context():
+        User.query.filter_by(username='bob').one().biography = 'Writes about quiet mornings.'
+        db.session.commit()
+    conversation = client.post('/api/conversations/direct', headers=alice_headers,
+                               json={'user_id': users['bob']['id']}).get_json()['conversation']
+    bob = next(person for person in conversation['participants'] if person['username'] == 'bob')
+    assert bob['biography'] == 'Writes about quiet mornings.'
+    first = client.post(f"/api/conversations/{conversation['id']}/messages", headers=alice_headers,
+                        json={'body': 'Listen to this'}).get_json()['message']
+    voice_bytes = b'\x1a\x45\xdf\xa3' + b'\x00' * 4 + b'\x42\x82\x84webm' + b'\x00' * 4
+    sent = client.post(f"/api/conversations/{conversation['id']}/messages", headers=alice_headers, data={
+        'body': '', 'reply_to_id': str(first['id']),
+        'files': (BytesIO(voice_bytes), 'voice-note.webm', 'audio/webm'),
+    }, content_type='multipart/form-data')
+    assert sent.status_code == 201, sent.get_json()
+    message = sent.get_json()['message']
+    assert message['body'] == ''
+    assert message['reply_to'] == {'id': first['id'], 'body': 'Listen to this', 'sender': 'Alice'}
+    assert message['media'][0]['media_type'] == 'audio'
+    assert client.get(message['media'][0]['url'], headers=alice_headers).data == voice_bytes
+    history = client.get(f"/api/conversations/{conversation['id']}/messages", headers=alice_headers).get_json()['messages']
+    assert history[1]['reply_to']['id'] == first['id']
+
+
 def test_group_membership_admin_actions_and_removed_member_socket_privacy(app, users):
     client = app.test_client()
     alice_token = users['alice']['token']

@@ -38,12 +38,14 @@ class Message(db.Model):
     conversation_id = db.Column(db.Integer, db.ForeignKey('conversations.id', ondelete='CASCADE'), nullable=False, index=True)
     sender_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)
     body = db.Column(db.String(5000), nullable=False)
+    reply_to_id = db.Column(db.Integer, db.ForeignKey('messages.id', ondelete='SET NULL'), nullable=True, index=True)
     created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
     updated_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     conversation = db.relationship('Conversation', back_populates='messages')
     sender = db.relationship('User')
     media = db.relationship('MessageMedia', back_populates='message', cascade='all, delete-orphan', order_by='MessageMedia.id')
+    reply_to = db.relationship('Message', remote_side=[id], foreign_keys=[reply_to_id])
 
 
 class MessageMedia(db.Model):

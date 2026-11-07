@@ -165,7 +165,7 @@ export default function Write() {
         await postService.reorderMedia(postId, order)
       }
 
-      navigate(targetStatus === 'published' ? `/post/${postId}` : '/my-writings')
+      navigate(targetStatus === 'published' ? '/' : '/my-writings')
     } catch (err) {
       if (!postUpdated) {
         for (const mediaId of uploaded) {

@@ -38,7 +38,7 @@ def send_socket_message(data):
     conversation_id = data.get('conversation_id')
     if isinstance(conversation_id, bool) or not isinstance(conversation_id, int):
         return {'ok': False, 'error': 'Invalid conversation'}
-    result = add_message(conversation_id, user_id, data.get('body'))
+    result = add_message(conversation_id, user_id, data.get('body'), data.get('reply_to_id'))
     if len(result) == 3:
         return {'ok': False, 'error': result[1]}
     message, error = result
@@ -47,6 +47,19 @@ def send_socket_message(data):
     payload = message_dict(message)
     emit_to_conversation_members(conversation_id, 'new_message', payload)
     return {'ok': True, 'message': payload}
+
+
+@socketio.on('typing')
+def typing_status(data):
+    user_id = session.get('midnight_user_id')
+    conversation_id = data.get('conversation_id') if isinstance(data, dict) else None
+    if user_id and isinstance(conversation_id, int) and membership(conversation_id, user_id):
+        current_user = db.session.get(User, user_id)
+        emit_to_conversation_members(conversation_id, 'typing', {
+            'conversation_id': conversation_id, 'user_id': user_id,
+            'display_name': current_user.display_name or current_user.username,
+            'is_typing': bool(data.get('is_typing')),
+        })
 
 
 @socketio.on('disconnect')

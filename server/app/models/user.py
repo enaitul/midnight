@@ -24,6 +24,7 @@ class User(db.Model):
     avatar_url = db.Column(db.String(255), nullable=True)
     display_name = db.Column(db.String(100), nullable=True, index=True)
     biography = db.Column(db.String(500), nullable=True)
+    instagram_url = db.Column(db.String(2048), nullable=True)
     age = db.Column(db.Integer, nullable=True)
     age_public = db.Column(db.Boolean, nullable=False, default=False)
     # Email verification status (True for Google accounts, False by default for local accounts)
@@ -48,6 +49,7 @@ class User(db.Model):
             'avatar_url': self.avatar_url,
             'display_name': self.display_name or self.username,
             'biography': self.biography,
+            'instagram_url': self.instagram_url,
             'age': self.age,
             'age_public': self.age_public,
             'email_verified': self.email_verified,
@@ -61,6 +63,7 @@ class User(db.Model):
             'display_name': self.display_name or self.username,
             'avatar_url': self.avatar_url,
             'biography': self.biography,
+            'instagram_url': self.instagram_url,
             'contributions': contribution_count,
             'created_at': self.created_at.isoformat(),
         }
