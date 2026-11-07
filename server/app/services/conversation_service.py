@@ -9,6 +9,17 @@ def membership(conversation_id, user_id):
     return ConversationParticipant.query.filter_by(conversation_id=conversation_id, user_id=user_id).first()
 
 
+def utc_isoformat(value):
+    """Serialize database timestamps using the app's UTC storage convention."""
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    else:
+        value = value.astimezone(timezone.utc)
+    return value.isoformat()
+
+
 def emit_to_conversation_members(conversation_id, event, payload):
     """Deliver realtime events only to users who are current members."""
     member_ids = db.session.query(ConversationParticipant.user_id).filter_by(
@@ -135,7 +146,7 @@ def message_dict(message):
         'reply_to': ({'id': message.reply_to.id, 'body': message.reply_to.body,
                       'sender': message.reply_to.sender.display_name or message.reply_to.sender.username}
                      if message.reply_to else None),
-        'created_at': message.created_at.isoformat(),
+        'created_at': utc_isoformat(message.created_at),
         'delivery_status': message_delivery_status(message),
         'media': [item.to_dict() for item in message.media],
         'sender': {
@@ -166,7 +177,7 @@ def conversation_dict(conversation, viewer_id, include_last_message=True):
         'avatar_url': (f'/api/conversations/{conversation.id}/group-avatar/{conversation.avatar_filename}'
                        if conversation.kind == 'group' and conversation.avatar_filename else None),
         'title': conversation.name or ', '.join((u.display_name or u.username) for u in others),
-        'created_at': conversation.created_at.isoformat(),
+        'created_at': utc_isoformat(conversation.created_at),
         'participants': [
             {'id': p.user_id, 'username': p.user.username, 'display_name': p.user.display_name or p.user.username,
              'avatar_url': p.user.avatar_url, 'biography': p.user.biography,

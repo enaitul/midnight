@@ -8,7 +8,7 @@ from app.models.conversation import Conversation, ConversationParticipant, Messa
 from app.services.conversation_service import (
     add_group_members, add_message, conversation_dict, leave_group, mark_read,
     group_message_receipts, membership, message_dict, remove_group_member, rename_group, create_direct, create_group,
-    emit_to_conversation_members, emit_to_user, record_group_system_events, update_group_details, update_group_member_role,
+    emit_to_conversation_members, emit_to_user, record_group_system_events, update_group_details, update_group_member_role, utc_isoformat,
 )
 from app.utils.auth_middleware import token_required
 from app.storage.media_storage import LocalMediaStorage, get_media_storage
@@ -218,7 +218,7 @@ def set_read_cursor(conversation_id):
     participant = mark_read(conversation_id, g.current_user.id)
     if not participant:
         return jsonify({'error': 'Conversation not found'}), 404
-    return jsonify({'last_read_at': participant.last_read_at.isoformat()}), 200
+    return jsonify({'last_read_at': utc_isoformat(participant.last_read_at)}), 200
 
 
 @conversations_bp.post('/<int:conversation_id>/participants')
