@@ -4,6 +4,7 @@ import { AlertCircle, ChevronLeft, ChevronRight, Loader, Search as SearchIcon, U
 import { communityService } from '../services/community'
 import PostMediaDisplay from '../components/PostMediaDisplay'
 import { resolveAssetUrl } from '../services/api'
+import { formatTimestamp } from '../utils/formatTimestamp'
 
 export default function Search() {
   const [query, setQuery] = useState('')
@@ -120,7 +121,7 @@ export default function Search() {
                   <Link to={`/post/${post.id}`}>
                     <span className="search-result-meta">
                       {post.author?.display_name || post.author?.username} ·{' '}
-                      {post.published_at ? new Date(post.published_at).toLocaleDateString() : 'Published'}
+                      {formatTimestamp(post.published_at || post.created_at) || 'Published'}
                     </span>
                     <h2>{post.title || 'Untitled piece'}</h2>
                     <p>{post.excerpt}</p>

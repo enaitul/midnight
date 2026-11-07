@@ -7,6 +7,7 @@ import FollowButton from '../components/FollowButton'
 import PostMediaDisplay from '../components/PostMediaDisplay'
 import { resolveAssetUrl } from '../services/api'
 import InstagramIcon from '../components/InstagramIcon'
+import { formatTimestamp } from '../utils/formatTimestamp'
 
 export default function Profile() {
   const { username } = useParams()
@@ -80,7 +81,7 @@ export default function Profile() {
       {ownPage && profile.email && <p className="profile-private">Private email · {profile.email}</p>}
     </div>}
     {ownPage && <div className="profile-tabs"><button className={!savedTab ? 'active' : ''} onClick={() => setSavedTab(false)}>My account</button><button className={savedTab ? 'active' : ''} onClick={() => setSavedTab(true)}>Saved writings</button></div>}
-    {savedTab && ownPage ? <div className="saved-list">{saved.length ? saved.map(post => <article key={post.id}><div><Link to={`/post/${post.id}`}><h2>{post.title || 'Untitled piece'}</h2></Link><p>{post.excerpt}</p></div><Link to={`/post/${post.id}`} aria-label={`Read ${post.title || 'untitled piece'}`}><BookOpen size={17} /></Link></article>) : <p className="feed-empty">Writings you save will be kept here.</p>}</div> : ownPage ? <div className="profile-shortcuts"><Link to="/my-writings"><BookOpen size={17} /> My writings</Link><Link to="/write"><PenLine size={17} /> Begin a new page</Link></div> : null}
+    {savedTab && ownPage ? <div className="saved-list">{saved.length ? saved.map(post => <article key={post.id}><div><Link to={`/post/${post.id}`}><h2>{post.title || 'Untitled piece'}</h2></Link><p>{post.excerpt}</p><time className="post-date" dateTime={post.published_at || post.created_at}>{formatTimestamp(post.published_at || post.created_at)}</time></div><Link to={`/post/${post.id}`} aria-label={`Read ${post.title || 'untitled piece'}`}><BookOpen size={17} /></Link></article>) : <p className="feed-empty">Writings you save will be kept here.</p>}</div> : ownPage ? <div className="profile-shortcuts"><Link to="/my-writings"><BookOpen size={17} /> My writings</Link><Link to="/write"><PenLine size={17} /> Begin a new page</Link></div> : null}
     {!ownPage && <div className="public-writings-section">
       <div className="section-heading"><h2>Published writings</h2></div>
       {profile.posts && profile.posts.length > 0 ? (
@@ -90,7 +91,7 @@ export default function Profile() {
               <div>
                 <Link to={`/post/${post.id}`}><h2>{post.title || 'Untitled piece'}</h2></Link>
                 <p>{post.excerpt}</p>
-                <span className="post-date">{post.published_at ? new Date(post.published_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : ''}</span>
+                <time className="post-date" dateTime={post.published_at || post.created_at}>{formatTimestamp(post.published_at || post.created_at)}</time>
                 <PostMediaDisplay media={post.media || []} />
               </div>
               <Link to={`/post/${post.id}`} aria-label={`Read ${post.title || 'untitled piece'}`}><BookOpen size={17} /></Link>

@@ -4,6 +4,7 @@ import { postService } from '../services/posts'
 import { useAuth } from '../context/AuthContext'
 import { Loader, AlertCircle, Edit3, Trash2, Plus, FileText, Globe } from 'lucide-react'
 import PostMediaDisplay from '../components/PostMediaDisplay'
+import { formatTimestamp } from '../utils/formatTimestamp'
 
 export default function MyWritings() {
   const [activeTab, setActiveTab] = useState('all') // 'all', 'draft', 'published'
@@ -154,10 +155,7 @@ export default function MyWritings() {
                   </span>
                   <span className="text-[11px] text-muted">
                     Last updated{' '}
-                    {new Date(post.updated_at).toLocaleDateString('en-US', {
-                      month: 'short',
-                      day: 'numeric',
-                    })}
+                    {formatTimestamp(post.updated_at || post.created_at)}
                   </span>
                 </div>
 

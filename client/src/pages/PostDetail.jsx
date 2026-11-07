@@ -7,6 +7,7 @@ import BookmarkButton from '../components/BookmarkButton'
 import PostEngagement from '../components/PostEngagement'
 import PostMediaDisplay from '../components/PostMediaDisplay'
 import { resolveAssetUrl } from '../services/api'
+import { formatTimestamp } from '../utils/formatTimestamp'
 
 export default function PostDetail() {
   const { id } = useParams()
@@ -72,17 +73,7 @@ export default function PostDetail() {
   }
 
   const isOwner = isAuthenticated && user?.id === post.author_id
-  const formattedDate = post.published_at
-    ? new Date(post.published_at).toLocaleDateString('en-US', {
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric',
-      })
-    : new Date(post.created_at).toLocaleDateString('en-US', {
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric',
-      })
+  const postTimestamp = post.published_at || post.created_at
 
   return (
     <article className="max-w-2xl mx-auto px-6 py-14">
@@ -144,7 +135,7 @@ export default function PostDetail() {
           <span>•</span>
           <span className="flex items-center gap-1">
             <Calendar className="w-3 h-3" />
-            <span>{formattedDate}</span>
+            <time dateTime={postTimestamp}>{formatTimestamp(postTimestamp)}</time>
           </span>
           <BookmarkButton postId={post.id} isAuthenticated={isAuthenticated} />
         </div>

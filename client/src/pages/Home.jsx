@@ -7,6 +7,7 @@ import BookmarkButton from '../components/BookmarkButton'
 import PostEngagement from '../components/PostEngagement'
 import PostMediaDisplay from '../components/PostMediaDisplay'
 import { resolveAssetUrl } from '../services/api'
+import { formatTimestamp } from '../utils/formatTimestamp'
 
 function PostOwnerMenu({ post, onDelete, deleting }) {
   const [open, setOpen] = useState(false)
@@ -86,7 +87,7 @@ export default function Home() {
           {post.author?.avatar_url ? <img src={resolveAssetUrl(post.author.avatar_url)} alt="" referrerPolicy="no-referrer" /> : <span className="avatar-fallback"><UserIcon size={14} /></span>}
           <Link to={`/profile/${encodeURIComponent(post.author?.username || '')}`} className="entry-author">{post.author?.display_name || post.author?.username || 'Unknown'}</Link>
           <span aria-hidden="true">·</span>
-          <time dateTime={post.published_at || undefined}>{post.published_at ? new Date(post.published_at).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }) : 'Recently'}</time>
+          <time dateTime={post.published_at || post.created_at}>{formatTimestamp(post.published_at || post.created_at) || 'Recently'}</time>
           {isAuthenticated && post.author?.id === user?.id && <PostOwnerMenu post={post} onDelete={deletePost} deleting={deletingPostId === post.id} />}
         </div>
         {post.title && <Link to={`/post/${post.id}`} className="entry-title-link"><h2>{post.title}</h2></Link>}
