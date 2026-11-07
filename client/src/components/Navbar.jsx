@@ -142,7 +142,7 @@ export default function Navbar() {
           <span>Help shape midnight</span>
           <button type="button" onClick={() => { setSettingsOpen(false); window.dispatchEvent(new Event('midnight:open-feedback')); navigate('/about?feedback=1') }}>Send feedback <MessageCircle size={15} /></button>
         </div>
-        {isAuthenticated && <div className="settings-group settings-logout-row">
+        {isAuthenticated && Boolean(user?.id) && <div className="settings-group settings-logout-row">
           <button type="button" onClick={() => { setSettingsOpen(false); logout(); navigate('/') }}><LogOut size={15} /> Log out</button>
         </div>}
       </section>}
