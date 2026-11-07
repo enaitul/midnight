@@ -577,9 +577,11 @@ export default function Messages() {
       <div className="messages-heading"><div><p className="eyebrow">A note between people</p><h1>Messages</h1></div><button className="icon-action" onClick={() => { setDialog('direct'); setError('') }} aria-label="Start a conversation" title="Start a conversation"><Plus size={18} /></button></div>
       <div className="message-list-actions"><button className="text-action" onClick={() => { setDialog('group'); setError('') }}><Users size={15} /> New group</button></div>
       {error && <p className="inline-error messages-error">{error}</p>}
-      {conversations.length === 0 ? <p className="feed-empty small">Your conversations will appear here.</p> : conversations.map(item => <button type="button" key={item.id} onClick={() => openConversation(item)} className={`conversation-preview${activeId === item.id ? ' active' : ''}`}>
-        <span className="conversation-mark">{item.kind === 'group' ? <Users size={17} /> : <MessageCircle size={17} />}</span><span className="conversation-copy"><strong>{item.title || item.name || 'Conversation'}</strong><small>{item.last_message?.body || 'No messages yet'}</small></span>{item.unread_count > 0 && <span className="unread-badge" aria-label={`${item.unread_count} unread messages`}>{item.unread_count}</span>}
-      </button>)}
+      {conversations.length === 0 ? <p className="feed-empty small">Your conversations will appear here.</p> : conversations.map(item => {
+        const otherPerson = item.kind === 'direct' ? item.participants?.find(person => person.id !== user?.id) : null
+        return <button type="button" key={item.id} onClick={() => openConversation(item)} className={`conversation-preview${activeId === item.id ? ' active' : ''}`}>
+        {otherPerson ? <span className="conversation-mark">{otherPerson.avatar_url ? <img src={resolveAssetUrl(otherPerson.avatar_url)} alt="" loading="lazy" referrerPolicy="no-referrer" /> : <span aria-hidden="true">{(otherPerson.display_name || '?').slice(0, 1).toUpperCase()}</span>}</span> : <span className="conversation-mark"><Users size={17} /></span>}<span className="conversation-copy"><strong>{item.title || item.name || 'Conversation'}</strong><small>{item.last_message?.body || 'No messages yet'}</small></span><span className="conversation-trailing">{!item.unread_count && item.last_message?.created_at && <time className="conversation-time" dateTime={item.last_message.created_at} title={new Date(item.last_message.created_at).toLocaleString()}>{new Date(item.last_message.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</time>}{item.unread_count > 0 && <span className="unread-badge" aria-label={`${item.unread_count} unread messages`}>{item.unread_count}</span>}</span>
+      </button>})}
     </aside>
     <main className="message-thread">
       {!activeId ? <div className="thread-empty"><MessageCircle size={28} /><p>Choose a conversation, or begin a new one.</p></div> : <>

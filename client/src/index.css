@@ -328,10 +328,13 @@ body:has(.messages-page) { overflow: hidden; }
 .conversation-preview { width: 100%; display: flex; align-items: center; gap: 12px; padding: 13px 17px; border: 0; border-top: 1px solid var(--line); text-align: left; background: transparent; color: var(--ink); cursor: pointer; }
 .conversation-preview:hover, .conversation-preview.active { background: var(--accent-wash); }
 .conversation-mark { width: 34px; height: 34px; flex: 0 0 34px; display: grid; place-items: center; border-radius: 50%; background: var(--paper); color: var(--accent); }
+.conversation-mark img { display: block; width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }
 .conversation-copy { min-width: 0; flex: 1; display: grid; gap: 5px; }
 .conversation-preview strong, .conversation-preview small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .conversation-preview strong { font-size: 13px; font-weight: 500; }
 .conversation-preview small { color: var(--muted); font-size: 11px; }
+.conversation-trailing { flex: 0 0 auto; min-width: 42px; display: flex; flex-direction: column; align-items: flex-end; gap: 5px; }
+.conversation-time { color: var(--muted); font: 10px/1.2 Arial, sans-serif; white-space: nowrap; }
 .unread-badge, .nav-unread { flex: 0 0 auto; min-width: 21px; height: 21px; display: inline-grid; place-items: center; padding: 0 5px; border-radius: 99px; background: #b63c36; color: #fff !important; font: 600 10px/1 Arial, sans-serif; }
 .nav-unread { position: absolute; top: 3px; right: 7px; }
 .message-thread { min-width: 0; min-height: 0; height: 100%; overflow: hidden; display: flex; flex-direction: column; }
@@ -725,4 +728,16 @@ body { font-size: 1rem; }
   }
   .shell-content { padding-bottom: 82px; }
   .side-link { border-radius: 50%; }
+}
+
+@media (max-width: 760px) {
+  .conversation-mark img { display: block; width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }
+  .conversation-mark > span { display: grid; place-items: center; width: 100%; height: 100%; border-radius: 50%; font: 16px Georgia, serif; }
+  .chat-message { padding-inline: 12px; }
+  .feed-entry-actions { position: relative; display: block; }
+  .feed-entry-actions .post-engagement { width: 100%; margin-top: 22px; }
+  .feed-entry-actions > .bookmark-control { position: absolute; top: 22px; right: 0; margin: 0; }
+  .feed-entry-actions .engagement-actions { padding-right: 48px; }
+  .comment-panel, .comment-form { width: 100%; }
+  .comment-like { justify-self: end; margin-right: -6px; }
 }
