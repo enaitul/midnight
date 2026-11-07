@@ -37,10 +37,11 @@ def schema_state(revision, *, migrated=False):
         },
         'users': {'columns': {'id', 'instagram_url'}},
         'conversation_participants': {
-            'columns': {'conversation_id', 'user_id'} | ({'last_delivered_message_id', 'last_read_message_id'} if migrated else set()),
+            'columns': {'conversation_id', 'user_id', 'last_delivered_message_id', 'last_read_message_id'},
         },
+        'conversations': {'columns': {'id', 'kind', 'name'} | ({'description', 'avatar_filename'} if migrated else set())},
     }
-    tables = production_db.PARENT_TABLES | production_db.MIGRATION_TABLES | {'conversation_participants', 'alembic_version'}
+    tables = production_db.PARENT_TABLES | production_db.MIGRATION_TABLES | {'conversation_participants', 'conversations', 'alembic_version'}
     return {'revisions': [revision], 'tables': tables, 'details': details}
 
 

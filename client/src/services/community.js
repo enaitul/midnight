@@ -22,6 +22,7 @@ export const communityService = {
   conversations: async () => (await api.get('/conversations')).data.conversations,
   conversation: async (id) => (await api.get(`/conversations/${id}`)).data.conversation,
   messages: async (id, params = {}) => (await api.get(`/conversations/${id}/messages`, { params })).data,
+  messageReceipts: async (id, messageId) => (await api.get(`/conversations/${id}/messages/${messageId}/receipts`)).data.receipts,
   sendMessage: async (id, body, replyToId) => (await api.post(`/conversations/${id}/messages`, { body, reply_to_id: replyToId })).data,
   sendMessageWithMedia: async (id, body, files, onProgress, replyToId) => {
     const data = new FormData()
@@ -33,10 +34,18 @@ export const communityService = {
     })).data
   },
   startDirect: async (userId) => (await api.post('/conversations/direct', { user_id: userId })).data.conversation,
-  startGroup: async (name, memberIds) => (await api.post('/conversations/groups', { name, member_ids: memberIds })).data.conversation,
+  startGroup: async (name, memberIds, description = '') => (await api.post('/conversations/groups', { name, member_ids: memberIds, description })).data.conversation,
   addMembers: async (id, memberIds) => (await api.post(`/conversations/${id}/participants`, { member_ids: memberIds })).data.conversation,
   removeMember: async (id, userId) => api.delete(`/conversations/${id}/participants/${userId}`),
+  updateMemberRole: async (id, userId, role) => (await api.put(`/conversations/${id}/participants/${userId}/role`, { role })).data.conversation,
   leaveGroup: async (id) => api.post(`/conversations/${id}/leave`),
   renameGroup: async (id, name) => (await api.put(`/conversations/${id}/name`, { name })).data.conversation,
+  updateGroupDetails: async (id, name, description) => (await api.put(`/conversations/${id}/details`, { name, description })).data.conversation,
+  uploadGroupAvatar: async (id, file) => {
+    const data = new FormData()
+    data.append('avatar', file)
+    return (await api.post(`/conversations/${id}/group-avatar`, data)).data.conversation
+  },
+  removeGroupAvatar: async id => (await api.delete(`/conversations/${id}/group-avatar`)).data.conversation,
   markRead: async (id) => api.post(`/conversations/${id}/read`),
 }

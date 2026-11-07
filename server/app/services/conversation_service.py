@@ -70,6 +70,37 @@ def message_delivery_status(message):
     return 'sent'
 
 
+def group_message_receipts(message, viewer_id):
+    """Return each other group member's latest receipt state for a message."""
+    receipts = []
+    for participant in message.conversation.participants:
+        if participant.user_id == viewer_id:
+            continue
+        is_read = bool(participant.last_read_message_id and participant.last_read_message_id >= message.id)
+        if not is_read and participant.last_read_at and message.created_at:
+            read_at = participant.last_read_at
+            created_at = message.created_at
+            if read_at.tzinfo is None and created_at.tzinfo is not None:
+                read_at = read_at.replace(tzinfo=created_at.tzinfo)
+            elif created_at.tzinfo is None and read_at.tzinfo is not None:
+                created_at = created_at.replace(tzinfo=read_at.tzinfo)
+            is_read = read_at >= created_at
+        if is_read:
+            status = 'read'
+        elif participant.last_delivered_message_id and participant.last_delivered_message_id >= message.id:
+            status = 'delivered'
+        else:
+            status = 'sent'
+        user = participant.user
+        receipts.append({
+            'user_id': user.id,
+            'display_name': user.display_name or user.username,
+            'username': user.username,
+            'status': status,
+        })
+    return receipts
+
+
 def message_dict(message):
     return {
         'id': message.id,
@@ -105,6 +136,9 @@ def conversation_dict(conversation, viewer_id, include_last_message=True):
         'id': conversation.id,
         'kind': conversation.kind,
         'name': conversation.name,
+        'description': conversation.description or '',
+        'avatar_url': (f'/api/conversations/{conversation.id}/group-avatar/{conversation.avatar_filename}'
+                       if conversation.kind == 'group' and conversation.avatar_filename else None),
         'title': conversation.name or ', '.join((u.display_name or u.username) for u in others),
         'created_at': conversation.created_at.isoformat(),
         'participants': [
@@ -145,9 +179,13 @@ def create_direct(user_id, other_id):
     return conversation, None, 201
 
 
-def create_group(creator_id, name, member_ids):
+def create_group(creator_id, name, member_ids, description=''):
     if not isinstance(name, str) or not name.strip() or len(name.strip()) > 100:
         return None, 'Group name must be between 1 and 100 characters', 400
+    if description is None:
+        description = ''
+    if not isinstance(description, str) or len(description.strip()) > 500:
+        return None, 'Group description must be 500 characters or fewer', 400
     if not isinstance(member_ids, list) or len(member_ids) > 29:
         return None, 'Add between 1 and 29 other members', 400
     if any(isinstance(user_id, bool) or not isinstance(user_id, int) for user_id in member_ids):
@@ -161,7 +199,8 @@ def create_group(creator_id, name, member_ids):
         return None, 'One or more users were not found', 404
     if len(ids) < 2:
         return None, 'A group needs at least one other member', 400
-    conversation = Conversation(kind='group', name=name.strip(), created_by_id=creator_id)
+    conversation = Conversation(kind='group', name=name.strip(), description=description.strip() or None,
+                                created_by_id=creator_id)
     db.session.add(conversation)
     db.session.flush()
     db.session.add_all([
@@ -226,16 +265,41 @@ def leave_group(conversation, user_id):
 
 
 def rename_group(conversation, user_id, new_name):
+    return update_group_details(conversation, user_id, new_name, conversation.description or '')
+
+
+def update_group_details(conversation, user_id, new_name, description):
     if conversation.kind != 'group':
-        return 'Only group conversations can be renamed', 400
+        return 'Only group details can be changed', 400
     participant = membership(conversation.id, user_id)
     if not participant:
         return 'Conversation not found', 404
     if participant.role != 'admin':
-        return 'Only group administrators can rename the group', 403
+        return 'Only group administrators can edit group details', 403
     if not isinstance(new_name, str) or not new_name.strip() or len(new_name.strip()) > 100:
         return 'Group name must be between 1 and 100 characters', 400
+    if not isinstance(description, str) or len(description.strip()) > 500:
+        return 'Group description must be 500 characters or fewer', 400
     conversation.name = new_name.strip()
+    conversation.description = description.strip() or None
+    conversation.updated_at = datetime.now(timezone.utc)
+    db.session.commit()
+    return None, None
+
+
+def update_group_member_role(conversation, user_id, role):
+    if conversation.kind != 'group':
+        return 'Only group members have group roles', 400
+    participant = membership(conversation.id, user_id)
+    if not participant:
+        return 'Member not found', 404
+    if not isinstance(role, str) or role not in {'admin', 'member'}:
+        return 'Role must be admin or member', 400
+    if participant.role == 'admin' and role == 'member':
+        admin_count = sum(item.role == 'admin' for item in conversation.participants)
+        if admin_count <= 1:
+            return 'A group must keep at least one administrator', 400
+    participant.role = role
     conversation.updated_at = datetime.now(timezone.utc)
     db.session.commit()
     return None, None

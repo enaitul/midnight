@@ -8,6 +8,8 @@ class Conversation(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     kind = db.Column(db.String(12), nullable=False, default='direct', index=True)
     name = db.Column(db.String(100), nullable=True)
+    description = db.Column(db.Text, nullable=True)
+    avatar_filename = db.Column(db.String(100), nullable=True)
     direct_key = db.Column(db.String(50), unique=True, nullable=True)
     created_by_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='SET NULL'), nullable=True, index=True)
     created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))

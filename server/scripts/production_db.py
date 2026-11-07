@@ -14,8 +14,8 @@ SERVER_DIR = Path(__file__).resolve().parents[1]
 PRODUCTION_ENV = SERVER_DIR / '.env.production.local'
 EXPECTED_HOST = 'aws-0-ap-northeast-1.pooler.supabase.com'
 EXPECTED_DATABASE = 'postgres'
-PREVIOUS_REVISION = '5ac1d4c983e7'
-EXPECTED_REVISION = '8d3c7a2f91b4'
+PREVIOUS_REVISION = '8d3c7a2f91b4'
+EXPECTED_REVISION = 'd19b6c4a7e20'
 EXPECTED_INDEXES = {
     'post_comment_likes': {
         'ix_post_comment_likes_comment_id',
@@ -36,7 +36,7 @@ EXPECTED_FOREIGN_KEYS = {
 }
 PARENT_TABLES = {'post_comments', 'messages', 'users'}
 MIGRATION_TABLES = {'post_comment_likes', 'message_media'}
-FEATURE_TABLES = {'messages', 'users', 'conversation_participants'}
+FEATURE_TABLES = {'messages', 'users', 'conversation_participants', 'conversations'}
 
 
 def load_connection():
@@ -168,6 +168,9 @@ def show_schema(state):
     participant_columns = state['details']['conversation_participants']['columns']
     print(f'  column conversation_participants.last_delivered_message_id: {"present" if "last_delivered_message_id" in participant_columns else "missing"}')
     print(f'  column conversation_participants.last_read_message_id: {"present" if "last_read_message_id" in participant_columns else "missing"}')
+    conversation_columns = state['details']['conversations']['columns']
+    print(f'  column conversations.description: {"present" if "description" in conversation_columns else "missing"}')
+    print(f'  column conversations.avatar_filename: {"present" if "avatar_filename" in conversation_columns else "missing"}')
 
 
 def legacy_schema_is_complete(state):
@@ -190,22 +193,22 @@ def previous_schema_is_complete(state):
         return False
     messages = state['details']['messages']
     users = state['details']['users']
+    participant_columns = state['details']['conversation_participants']['columns']
     return (
         'reply_to_id' in messages['columns']
         and 'ix_messages_reply_to_id' in messages['indexes']
         and ('reply_to_id', 'messages', 'id', 'SET NULL') in messages['foreign_keys']
         and 'instagram_url' in users['columns']
+        and 'last_delivered_message_id' in participant_columns
+        and 'last_read_message_id' in participant_columns
     )
 
 
 def schema_is_complete(state):
     if not previous_schema_is_complete(state):
         return False
-    participant_columns = state['details']['conversation_participants']['columns']
-    return (
-        'last_delivered_message_id' in participant_columns
-        and 'last_read_message_id' in participant_columns
-    )
+    conversation_columns = state['details']['conversations']['columns']
+    return 'description' in conversation_columns and 'avatar_filename' in conversation_columns
 
 
 def migration_environment(raw_url, ssl_required):

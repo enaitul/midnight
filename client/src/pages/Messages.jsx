@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { io } from 'socket.io-client'
-import { ArrowLeft, Check, Edit2, Loader, MessageCircle, Plus, Search, Send, Smile, Paperclip, Users, X, Mic, Reply } from 'lucide-react'
+import { ArrowLeft, Check, Loader, MessageCircle, Plus, Search, Send, Smile, Paperclip, Users, X, Mic, Reply, Camera, Pencil, Shield, UserPlus, UserMinus, LogOut, Info } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { communityService } from '../services/community'
 import { findUserSearchResult, getUserSearchResults } from '../services/searchResults'
@@ -33,6 +33,26 @@ const dayLabel = value => {
   if (dayKey(date) === dayKey(today)) return 'Today'
   if (dayKey(date) === dayKey(yesterday)) return 'Yesterday'
   return date.toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: date.getFullYear() === today.getFullYear() ? undefined : 'numeric' })
+}
+
+function GroupAvatar({ conversation, className = '' }) {
+  const [imageUrl, setImageUrl] = useState('')
+  const avatarPath = conversation?.avatar_url
+  useEffect(() => {
+    if (!avatarPath) { setImageUrl(''); return undefined }
+    let active = true
+    let objectUrl = ''
+    const endpoint = avatarPath.replace(/^\/api(?=\/)/, '')
+    api.get(endpoint, { responseType: 'blob' }).then(response => {
+      if (!active) return
+      objectUrl = URL.createObjectURL(response.data)
+      setImageUrl(objectUrl)
+    }).catch(() => { if (active) setImageUrl('') })
+    return () => { active = false; if (objectUrl) URL.revokeObjectURL(objectUrl) }
+  }, [avatarPath])
+  return <span className={`group-avatar ${className}`} aria-hidden="true">
+    {imageUrl ? <img src={imageUrl} alt="" /> : <Users className="group-avatar-fallback" />}
+  </span>
 }
 const messageLinks = text => text.split(/(https?:\/\/[^\s]+)/g).map((part, index) => /^https?:\/\//i.test(part)
   ? <a key={index} href={part} target="_blank" rel="noreferrer noopener">{part}</a>
@@ -93,8 +113,13 @@ export default function Messages() {
   const [people, setPeople] = useState([])
   const [selectedPeople, setSelectedPeople] = useState([])
   const [groupName, setGroupName] = useState('')
-  const [editingName, setEditingName] = useState(false)
-  const [renameInput, setRenameInput] = useState('')
+  const [groupDescription, setGroupDescription] = useState('')
+  const [showGroupInfo, setShowGroupInfo] = useState(false)
+  const [editingGroupDetails, setEditingGroupDetails] = useState(false)
+  const [groupNameDraft, setGroupNameDraft] = useState('')
+  const [groupDescriptionDraft, setGroupDescriptionDraft] = useState('')
+  const [addingMembers, setAddingMembers] = useState(false)
+  const [groupActionBusy, setGroupActionBusy] = useState(false)
   const [sending, setSending] = useState(false)
   const [emojiOpen, setEmojiOpen] = useState(false)
   const [emojiCategory, setEmojiCategory] = useState(0)
@@ -107,6 +132,10 @@ export default function Messages() {
   const [recordingSeconds, setRecordingSeconds] = useState(0)
   const [pullingMessageId, setPullingMessageId] = useState(null)
   const [pullOffset, setPullOffset] = useState(0)
+  const [selectedMessageForInfo, setSelectedMessageForInfo] = useState(null)
+  const [messageInfo, setMessageInfo] = useState(null)
+  const [messageInfoLoading, setMessageInfoLoading] = useState(false)
+  const [messageInfoError, setMessageInfoError] = useState('')
   const [historyHasMore, setHistoryHasMore] = useState(false)
   const [loadingOlder, setLoadingOlder] = useState(false)
   const [floatingDate, setFloatingDate] = useState('')
@@ -118,6 +147,8 @@ export default function Messages() {
   const bottomRef = useRef(null)
   const historyRef = useRef(null)
   const inputRef = useRef(null)
+  const groupAvatarInputRef = useRef(null)
+  const groupInfoScrollTopRef = useRef(0)
   const scrollBottomRef = useRef(true)
   const floatDateTimerRef = useRef(null)
   const attachmentsRef = useRef([])
@@ -201,6 +232,9 @@ export default function Messages() {
 
   const openConversation = item => {
     clearComposer()
+    setShowGroupInfo(false)
+    setAddingMembers(false)
+    setSelectedMessageForInfo(null)
     setConversations(current => current.map(conversation => conversation.id === item.id ? { ...conversation, unread_count: 0 } : conversation))
     setActiveId(item.id)
   }
@@ -306,15 +340,15 @@ export default function Messages() {
 
   useEffect(() => {
     const term = personQuery.trim()
-    if (!term || !dialog) { setPeople([]); return undefined }
+    if (!term || (!dialog && !addingMembers)) { setPeople([]); return undefined }
     const timer = window.setTimeout(() => communityService.search(term, 'users').then(data => setPeople(getUserSearchResults(data))).catch(() => setPeople([])), 250)
     return () => window.clearTimeout(timer)
-  }, [personQuery, dialog])
+  }, [personQuery, dialog, addingMembers])
 
   const openDirect = async person => {
     try {
       const conversation = await communityService.startDirect(person.id)
-      clearComposer(); setDialog(''); setPersonQuery(''); setActiveId(conversation.id); await loadConversations()
+      clearComposer(); setDialog(''); setPersonQuery(''); setShowGroupInfo(false); setActiveId(conversation.id); await loadConversations()
     } catch (err) { setError(err.response?.data?.error || 'Could not start the conversation.') }
   }
 
@@ -419,7 +453,11 @@ export default function Messages() {
         gesture.longPressed = true
         setPullingMessageId(message.id)
         setPullOffset(62)
-        window.setTimeout(() => { setReplyTo(message); inputRef.current?.focus() }, 170)
+        if (activeConversation?.kind === 'group' && message.sender.id === user?.id) {
+          setSelectedMessageForInfo(message)
+        } else {
+          window.setTimeout(() => { setReplyTo(message); inputRef.current?.focus() }, 170)
+        }
       }, 480)
     }
   }
@@ -448,7 +486,7 @@ export default function Messages() {
     window.clearTimeout(gesture.timer)
     const deltaX = event.clientX - gesture.startX
     const deltaY = event.clientY - gesture.startY
-    const shouldReply = !cancelled && (gesture.longPressed || (deltaX > 66 && Math.abs(deltaY) < 48))
+    const shouldReply = !cancelled && !gesture.longPressed && deltaX > 66 && Math.abs(deltaY) < 48
     setPullOffset(0)
     window.setTimeout(() => setPullingMessageId(current => current === gesture.message.id ? null : current), 190)
     if (shouldReply) {
@@ -460,6 +498,19 @@ export default function Messages() {
   const replyToMessage = message => {
     setReplyTo(message)
     inputRef.current?.focus()
+  }
+
+  const openMessageInfo = async () => {
+    if (!selectedMessageForInfo || activeConversation?.kind !== 'group') return
+    setMessageInfo(null)
+    setMessageInfoError('')
+    setMessageInfoLoading(true)
+    try {
+      const receipts = await communityService.messageReceipts(activeId, selectedMessageForInfo.id)
+      setMessageInfo({ message: selectedMessageForInfo, receipts })
+    } catch (err) {
+      setMessageInfoError(err.response?.data?.error || 'Message information could not be loaded.')
+    } finally { setMessageInfoLoading(false) }
   }
 
   useEffect(() => {
@@ -552,36 +603,101 @@ export default function Messages() {
   const createGroup = async event => {
     event.preventDefault()
     try {
-      const conversation = await communityService.startGroup(groupName, selectedPeople.map(person => person.id))
-      clearComposer(); setDialog(''); setSelectedPeople([]); setPersonQuery(''); setGroupName(''); setActiveId(conversation.id); await loadConversations()
+      const conversation = await communityService.startGroup(groupName, selectedPeople.map(person => person.id), groupDescription)
+      clearComposer(); setDialog(''); setSelectedPeople([]); setPersonQuery(''); setGroupName(''); setGroupDescription(''); setShowGroupInfo(false); setActiveId(conversation.id); await loadConversations()
     } catch (err) { setError(err.response?.data?.error || 'Group could not be created.') }
   }
 
   const togglePerson = person => setSelectedPeople(current => current.some(item => item.id === person.id) ? current.filter(item => item.id !== person.id) : [...current, person])
-  const manageMember = async person => {
-    try { const updated = await communityService.addMembers(activeId, [person.id]); setActiveConversation(updated); setPeople([]); setPersonQuery(''); await loadConversations() }
-    catch (err) { setError(err.response?.data?.error || 'Member could not be added.') }
+  const acceptGroupUpdate = updated => {
+    setActiveConversation(updated)
+    setConversations(current => current.map(item => item.id === updated.id ? { ...item, ...updated } : item))
+  }
+  const addSelectedMembers = async () => {
+    if (!selectedPeople.length || groupActionBusy) return
+    setGroupActionBusy(true); setError('')
+    try {
+      const updated = await communityService.addMembers(activeId, selectedPeople.map(person => person.id))
+      acceptGroupUpdate(updated)
+      setSelectedPeople([]); setPeople([]); setPersonQuery(''); setAddingMembers(false)
+      await loadConversations()
+    } catch (err) { setError(err.response?.data?.error || 'Members could not be added.') }
+    finally { setGroupActionBusy(false) }
   }
   const removeMember = async person => {
-    try { await communityService.removeMember(activeId, person.id); setActiveConversation(await communityService.conversation(activeId)); await loadConversations() }
-    catch (err) { setError(err.response?.data?.error || 'Member could not be removed.') }
+    if (!window.confirm(`Remove ${person.display_name} from this group? They will lose access to the group conversation.`)) return
+    setGroupActionBusy(true); setError('')
+    try {
+      await communityService.removeMember(activeId, person.id)
+      acceptGroupUpdate(await communityService.conversation(activeId))
+      await loadConversations()
+    } catch (err) { setError(err.response?.data?.error || 'Member could not be removed.') }
+    finally { setGroupActionBusy(false) }
   }
   const leaveGroup = async () => {
-    try { await communityService.leaveGroup(activeId); clearComposer(); setActiveId(null); setActiveConversation(null); await loadConversations() }
+    if (!window.confirm('Leave this group? You will no longer receive its messages.')) return
+    try { await communityService.leaveGroup(activeId); clearComposer(); setShowGroupInfo(false); setActiveId(null); setActiveConversation(null); await loadConversations() }
     catch (err) { setError(err.response?.data?.error || 'Could not leave this group.') }
   }
 
-  const saveGroupName = async (event) => {
+  const saveGroupDetails = async event => {
     event.preventDefault()
-    if (!renameInput.trim()) return
+    setGroupActionBusy(true); setError('')
     try {
-      const updated = await communityService.renameGroup(activeId, renameInput.trim())
-      setActiveConversation(updated)
-      setEditingName(false)
+      const updated = await communityService.updateGroupDetails(activeId, groupNameDraft, groupDescriptionDraft)
+      acceptGroupUpdate(updated)
+      setEditingGroupDetails(false)
       await loadConversations()
-    } catch (err) {
-      setError(err.response?.data?.error || 'Could not rename group.')
+    } catch (err) { setError(err.response?.data?.error || 'Group details could not be saved.') }
+    finally { setGroupActionBusy(false) }
+  }
+
+  const updateMemberRole = async person => {
+    const role = person.role === 'admin' ? 'member' : 'admin'
+    if (role === 'member' && !window.confirm(`Remove administrator status from ${person.display_name}?`)) return
+    setGroupActionBusy(true); setError('')
+    try {
+      acceptGroupUpdate(await communityService.updateMemberRole(activeId, person.id, role))
+      await loadConversations()
+    } catch (err) { setError(err.response?.data?.error || 'Member role could not be changed.') }
+    finally { setGroupActionBusy(false) }
+  }
+
+  const uploadGroupPicture = async event => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type) || file.size > 3 * 1024 * 1024) {
+      setError('Choose a JPEG, PNG, or WebP group picture up to 3 MB.')
+      return
     }
+    setGroupActionBusy(true); setError('')
+    try {
+      acceptGroupUpdate(await communityService.uploadGroupAvatar(activeId, file))
+      await loadConversations()
+    } catch (err) { setError(err.response?.data?.error || 'Group picture could not be uploaded.') }
+    finally { setGroupActionBusy(false) }
+  }
+
+  const removeGroupPicture = async () => {
+    if (!activeConversation?.avatar_url || !window.confirm('Remove this group picture?')) return
+    setGroupActionBusy(true); setError('')
+    try {
+      acceptGroupUpdate(await communityService.removeGroupAvatar(activeId))
+      await loadConversations()
+    } catch (err) { setError(err.response?.data?.error || 'Group picture could not be removed.') }
+    finally { setGroupActionBusy(false) }
+  }
+
+  const openGroupInfo = () => {
+    groupInfoScrollTopRef.current = historyRef.current?.scrollTop || 0
+    setShowGroupInfo(true)
+    setEditingGroupDetails(false)
+    setAddingMembers(false)
+  }
+  const returnToGroupChat = () => {
+    setShowGroupInfo(false)
+    requestAnimationFrame(() => { if (historyRef.current) historyRef.current.scrollTop = groupInfoScrollTopRef.current })
   }
 
   const activeRole = activeConversation?.participants?.find(person => person.id === user?.id)?.role
@@ -590,57 +706,78 @@ export default function Messages() {
   return <section className={`messages-page${activeId ? ' conversation-open' : ''}`}>
     <aside className="conversation-list">
       <div className="messages-heading"><div><p className="eyebrow">A note between people</p><h1>Messages</h1></div><button className="icon-action" onClick={() => { setDialog('direct'); setError('') }} aria-label="Start a conversation" title="Start a conversation"><Plus size={18} /></button></div>
-      <div className="message-list-actions"><button className="text-action" onClick={() => { setDialog('group'); setError('') }}><Users size={15} /> New group</button></div>
+      <div className="message-list-actions"><button className="text-action" onClick={() => { setDialog('group'); setError(''); setGroupName(''); setGroupDescription(''); setPersonQuery(''); setSelectedPeople([]) }}><Users size={15} /> New group</button></div>
       {error && <p className="inline-error messages-error">{error}</p>}
       {conversations.length === 0 ? <p className="feed-empty small">Your conversations will appear here.</p> : conversations.map(item => {
         const otherPerson = item.kind === 'direct' ? item.participants?.find(person => person.id !== user?.id) : null
         return <button type="button" key={item.id} onClick={() => openConversation(item)} className={`conversation-preview${activeId === item.id ? ' active' : ''}`}>
-        {otherPerson ? <span className="conversation-mark">{otherPerson.avatar_url ? <img src={resolveAssetUrl(otherPerson.avatar_url)} alt="" loading="lazy" referrerPolicy="no-referrer" /> : <span aria-hidden="true">{(otherPerson.display_name || '?').slice(0, 1).toUpperCase()}</span>}</span> : <span className="conversation-mark"><Users size={17} /></span>}<span className="conversation-copy"><strong>{item.title || item.name || 'Conversation'}</strong><small>{item.last_message?.body || 'No messages yet'}</small></span><span className="conversation-trailing">{!item.unread_count && item.last_message?.created_at && <time className="conversation-time" dateTime={item.last_message.created_at} title={new Date(item.last_message.created_at).toLocaleString()}>{new Date(item.last_message.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</time>}{item.unread_count > 0 && <span className="unread-badge" aria-label={`${item.unread_count} unread messages`}>{item.unread_count}</span>}</span>
+        {item.kind === 'group' ? <GroupAvatar conversation={item} className="conversation-mark" /> : <span className="conversation-mark">{otherPerson?.avatar_url ? <img src={resolveAssetUrl(otherPerson.avatar_url)} alt="" loading="lazy" referrerPolicy="no-referrer" /> : <span aria-hidden="true">{(otherPerson?.display_name || '?').slice(0, 1).toUpperCase()}</span>}</span>}<span className="conversation-copy"><strong>{item.title || item.name || 'Conversation'}</strong><small>{item.last_message?.body || 'No messages yet'}</small></span><span className="conversation-trailing">{!item.unread_count && item.last_message?.created_at && <time className="conversation-time" dateTime={item.last_message.created_at} title={new Date(item.last_message.created_at).toLocaleString()}>{new Date(item.last_message.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</time>}{item.unread_count > 0 && <span className="unread-badge" aria-label={`${item.unread_count} unread messages`}>{item.unread_count}</span>}</span>
       </button>})}
     </aside>
     <main className="message-thread">
-      {!activeId ? <div className="thread-empty"><MessageCircle size={28} /><p>Choose a conversation, or begin a new one.</p></div> : <>
+      {showGroupInfo && activeConversation?.kind === 'group' ? <section className="group-info-screen">
+        <header className="group-info-header"><button type="button" onClick={returnToGroupChat} aria-label="Back to conversation"><ArrowLeft size={19} /><span>Back</span></button><h2>Group info</h2><span /></header>
+        <div className="group-info-scroll">
+          <section className="group-info-hero">
+            <GroupAvatar conversation={activeConversation} className="group-avatar-large" />
+            {activeRole === 'admin' && <div className="group-picture-actions">
+              <input ref={groupAvatarInputRef} type="file" accept="image/jpeg,image/png,image/webp" onChange={uploadGroupPicture} hidden />
+              <button type="button" onClick={() => groupAvatarInputRef.current?.click()} disabled={groupActionBusy}><Camera size={16} />{activeConversation.avatar_url ? 'Change picture' : 'Add picture'}</button>
+              {activeConversation.avatar_url && <button type="button" className="group-remove-picture" onClick={removeGroupPicture} disabled={groupActionBusy}>Remove</button>}
+            </div>}
+            <h1>{activeConversation.name || 'Group conversation'}</h1>
+            <p>{activeConversation.participants?.length || 0} members</p>
+          </section>
+
+          {error && <p className="inline-error group-info-error" role="alert">{error}</p>}
+
+          <section className="group-info-section">
+            <header><div><p className="eyebrow">About</p><h3>Group details</h3></div>{activeRole === 'admin' && !editingGroupDetails && <button type="button" className="group-info-edit" onClick={() => { setGroupNameDraft(activeConversation.name || ''); setGroupDescriptionDraft(activeConversation.description || ''); setEditingGroupDetails(true) }}><Pencil size={15} /> Edit</button>}</header>
+            {editingGroupDetails ? <form className="group-info-form" onSubmit={saveGroupDetails}>
+              <label>Group name<input value={groupNameDraft} onChange={event => setGroupNameDraft(event.target.value)} maxLength={100} required /></label>
+              <label>Description<textarea value={groupDescriptionDraft} onChange={event => setGroupDescriptionDraft(event.target.value)} maxLength={500} rows={3} placeholder="Add a group description" /></label>
+              <div className="group-info-form-actions"><button type="button" className="text-action" onClick={() => setEditingGroupDetails(false)}>Cancel</button><button type="submit" className="primary-action" disabled={groupActionBusy || !groupNameDraft.trim()}>{groupActionBusy ? 'Saving…' : 'Save changes'}</button></div>
+            </form> : <p className="group-info-description">{activeConversation.description || 'No description yet.'}</p>}
+          </section>
+
+          <section className="group-info-section group-members-section">
+            <header><div><p className="eyebrow">People</p><h3>Members <span>({activeConversation.participants?.length || 0})</span></h3></div>{activeRole === 'admin' && <button type="button" className="group-info-edit" onClick={() => { setAddingMembers(value => !value); setSelectedPeople([]); setPersonQuery(''); setPeople([]) }}><UserPlus size={16} /> Add</button>}</header>
+            {addingMembers && activeRole === 'admin' && <div className="group-add-members">
+              <label>Find people<input value={personQuery} onChange={event => setPersonQuery(event.target.value)} placeholder="Search by name or username" /></label>
+              <div className="group-member-candidates">{people.filter(person => person.id !== user?.id && !activeConversation.participants.some(member => member.id === person.id)).map(person => {
+                const selected = selectedPeople.some(item => item.id === person.id)
+                return <button type="button" key={person.id} onClick={() => togglePerson(person)} aria-pressed={selected}><span>{person.display_name}<small>@{person.username}</small></span>{selected ? <Check size={17} /> : <Plus size={17} />}</button>
+              })}{personQuery.trim() && !people.some(person => person.id !== user?.id && !activeConversation.participants.some(member => member.id === person.id)) && <p>No available people found.</p>}</div>
+              <div className="group-info-form-actions"><span className="selected-count">{selectedPeople.length} selected</span><button type="button" className="primary-action" onClick={addSelectedMembers} disabled={!selectedPeople.length || groupActionBusy}>{groupActionBusy ? 'Adding…' : 'Add members'}</button></div>
+            </div>}
+            <div className="group-member-list">{activeConversation.participants.map(person => <article className="group-member-row" key={person.id}>
+              {person.avatar_url ? <img className="group-member-avatar" src={resolveAssetUrl(person.avatar_url)} alt="" loading="lazy" referrerPolicy="no-referrer" /> : <span className="group-member-avatar group-member-avatar-fallback">{(person.display_name || '?').slice(0, 1).toUpperCase()}</span>}
+              <span className="group-member-copy"><strong>{person.display_name}{person.id === user?.id ? ' (you)' : ''}</strong><small>@{person.username}</small></span>
+              <span className={`group-role-label${person.role === 'admin' ? ' admin' : ''}`}>{person.role === 'admin' ? <><Shield size={12} /> Admin</> : 'Member'}</span>
+              {activeRole === 'admin' && person.id !== user?.id && <div className="group-member-actions">
+                <button type="button" onClick={() => updateMemberRole(person)} disabled={groupActionBusy} aria-label={`${person.role === 'admin' ? 'Demote' : 'Promote'} ${person.display_name}`} title={person.role === 'admin' ? 'Make member' : 'Make admin'}>{person.role === 'admin' ? <Shield size={15} /> : <Shield size={15} />}</button>
+                <button type="button" className="remove-member-action" onClick={() => removeMember(person)} disabled={groupActionBusy} aria-label={`Remove ${person.display_name}`} title="Remove member"><UserMinus size={16} /></button>
+              </div>}
+            </article>)}</div>
+          </section>
+          <button type="button" className="group-leave-button" onClick={leaveGroup}><LogOut size={16} /> Leave group</button>
+        </div>
+      </section> : !activeId ? <div className="thread-empty"><MessageCircle size={28} /><p>Choose a conversation, or begin a new one.</p></div> : <>
         <header className="thread-header">
           <button className="mobile-back" onClick={() => { clearComposer(); setActiveId(null) }} aria-label="Back to conversations"><ArrowLeft size={18} /></button>
-          {directPerson && <Link className="thread-profile-avatar" to={`/profile/${encodeURIComponent(directPerson.username)}`} aria-label={`View ${directPerson.display_name}'s profile`}>
-            {directPerson.avatar_url ? <img className="thread-avatar" src={resolveAssetUrl(directPerson.avatar_url)} alt="" referrerPolicy="no-referrer" /> : <span className="thread-avatar thread-avatar-fallback">{(directPerson.display_name || '?').slice(0, 1).toUpperCase()}</span>}
-          </Link>}
-          <div className="thread-person-copy">
-            {editingName ? (
-              <form onSubmit={saveGroupName} className="flex items-center gap-1.5">
-                <input
-                  value={renameInput}
-                  onChange={(e) => setRenameInput(e.target.value)}
-                  maxLength={100}
-                  className="bg-[#19191f] text-primary text-sm px-2 py-0.5 rounded border border-[#2a2a38] outline-none"
-                  autoFocus
-                />
-                <button type="submit" className="text-xs text-accent hover:underline">Save</button>
-                <button type="button" onClick={() => setEditingName(false)} className="text-xs text-muted hover:underline">Cancel</button>
-              </form>
-            ) : (
-              <div className="flex items-center gap-2">
-                <h2>{directPerson
-                  ? <Link className="thread-profile-name" to={`/profile/${encodeURIComponent(directPerson.username)}`}>{directPerson.display_name}</Link>
-                  : activeConversation?.title || 'Conversation'}</h2>
-                {activeConversation?.kind === 'group' && activeRole === 'admin' && (
-                  <button
-                    type="button"
-                    onClick={() => { setRenameInput(activeConversation.name || ''); setEditingName(true) }}
-                    className="text-muted hover:text-primary transition"
-                    title="Rename group"
-                  >
-                    <Edit2 size={13} />
-                  </button>
-                )}
-              </div>
-            )}
-            <small className="thread-bio">{directPerson?.biography?.trim() || (activeConversation?.kind === 'group' ? 'Group conversation' : 'No bio added yet')}</small>
-          </div>
+          {activeConversation?.kind === 'group' ? <button type="button" className="group-header-trigger" onClick={openGroupInfo} aria-label="Open group information">
+            <GroupAvatar conversation={activeConversation} className="group-avatar-header" />
+            <span className="thread-person-copy"><strong>{activeConversation.name || 'Group conversation'}</strong><small className="thread-bio">{activeConversation.description || `${activeConversation.participants?.length || 0} members`}</small></span>
+          </button> : <>
+            {directPerson && <Link className="thread-profile-avatar" to={`/profile/${encodeURIComponent(directPerson.username)}`} aria-label={`View ${directPerson.display_name}'s profile`}>
+              {directPerson.avatar_url ? <img className="thread-avatar" src={resolveAssetUrl(directPerson.avatar_url)} alt="" referrerPolicy="no-referrer" /> : <span className="thread-avatar thread-avatar-fallback">{(directPerson.display_name || '?').slice(0, 1).toUpperCase()}</span>}
+            </Link>}
+            <div className="thread-person-copy"><h2>{directPerson ? <Link className="thread-profile-name" to={`/profile/${encodeURIComponent(directPerson.username)}`}>{directPerson.display_name}</Link> : activeConversation?.title || 'Conversation'}</h2><small className="thread-bio">{directPerson?.biography?.trim() || 'No bio added yet'}</small></div>
+          </>}
           {directPerson?.instagram_url && <a className="thread-instagram-link" href={directPerson.instagram_url} target="_blank" rel="noreferrer noopener" aria-label={`${directPerson.display_name}'s Instagram profile`} title="Open Instagram profile"><InstagramIcon size={20} /></a>}
-          {activeConversation?.kind === 'group' && <span className="participants-count"><Users size={15} /> {activeConversation.participants.length}</span>}
+          {activeConversation?.kind === 'group' && selectedMessageForInfo && <><button type="button" className="message-info-action" onClick={openMessageInfo} aria-label="View message info" title="Message info"><Info size={18} /><span>Info</span></button><button type="button" className="message-info-dismiss" onClick={() => setSelectedMessageForInfo(null)} aria-label="Clear selected message"><X size={17} /></button></>}
+          {activeConversation?.kind === 'group' && !selectedMessageForInfo && <span className="participants-count"><Users size={15} /> {activeConversation.participants.length}</span>}
         </header>
-        {activeConversation?.kind === 'group' && <div className="group-members">{activeConversation.participants.map(person => <span key={person.id}><Link to={`/profile/${encodeURIComponent(person.username)}`}>{person.display_name}</Link>{activeRole === 'admin' && person.id !== user?.id && <button onClick={() => removeMember(person)} aria-label={`Remove ${person.display_name}`}><X size={12} /></button>}</span>)}{activeRole === 'admin' && <div className="member-add"><input value={personQuery} onChange={e => setPersonQuery(e.target.value)} placeholder="Add a member" />{people.filter(p => !activeConversation.participants.some(m => m.id === p.id)).map(person => <button key={person.id} onClick={() => manageMember(person)}>{person.display_name} <Plus size={13} /></button>)}</div>}<button className="text-action" onClick={leaveGroup}>Leave group</button></div>}
         <div className="message-history" ref={historyRef} onScroll={handleHistoryScroll}>
           {showFloatingDate && floatingDate && <div className="floating-message-date" aria-live="polite">{floatingDate}</div>}
           {historyHasMore && <button className="load-older-messages" type="button" onClick={loadOlderMessages} disabled={loadingOlder}>{loadingOlder ? 'Loading…' : 'Load older messages'}</button>}
@@ -659,7 +796,7 @@ export default function Messages() {
             </Link> : <span className="message-avatar-spacer" />
             return <div className="message-day-group" key={message.id}>
               {startsDay && <div className="chat-date-separator"><span>{dayLabel(message.created_at)}</span></div>}
-              <article className={`chat-message${mine ? ' mine' : ''}${startsGroup ? ' group-start' : ''}${endsGroup ? ' group-end' : ''}${pullingMessageId === message.id ? ' is-pulling' : ''}`} style={pullingMessageId === message.id ? { transform: `translateX(${pullOffset}px)` } : undefined} data-message-date={dayKey(message.created_at)} data-date-label={dayLabel(message.created_at)} onPointerDown={event => beginMessagePull(message, event)} onPointerMove={moveMessagePull} onPointerUp={event => finishMessagePull(event)} onPointerCancel={event => finishMessagePull(event, true)}>
+              <article className={`chat-message${mine ? ' mine' : ''}${startsGroup ? ' group-start' : ''}${endsGroup ? ' group-end' : ''}${pullingMessageId === message.id ? ' is-pulling' : ''}${selectedMessageForInfo?.id === message.id ? ' message-info-selected' : ''}`} style={pullingMessageId === message.id ? { transform: `translateX(${pullOffset}px)` } : undefined} data-message-date={dayKey(message.created_at)} data-date-label={dayLabel(message.created_at)} onContextMenu={event => { if (activeConversation?.kind !== 'group' || !mine) return; event.preventDefault(); setSelectedMessageForInfo(message) }} onPointerDown={event => beginMessagePull(message, event)} onPointerMove={moveMessagePull} onPointerUp={event => finishMessagePull(event)} onPointerCancel={event => finishMessagePull(event, true)}>
                 {!mine && avatar}
                 <div className="chat-message-stack">
                   {activeConversation?.kind === 'group' && startsGroup && <Link className="chat-sender-name" to={`/profile/${encodeURIComponent(message.sender.username)}`}>{mine ? 'You' : message.sender.display_name}</Link>}
@@ -702,6 +839,7 @@ export default function Messages() {
         </div>
       </>}
     </main>
-    {dialog && <div className="dialog-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) setDialog('') }}><section className="community-dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title"><header><h2 id="dialog-title">{dialog === 'group' ? 'Create a group' : 'New conversation'}</h2><button className="icon-action" onClick={() => setDialog('')} aria-label="Close"><X size={18} /></button></header>{dialog === 'group' && <label>Group name<input value={groupName} onChange={event => setGroupName(event.target.value)} maxLength={100} /></label>}<label>{dialog === 'group' ? 'Add people' : 'Find a person'}<input value={personQuery} onChange={event => setPersonQuery(event.target.value)} placeholder="Search by name or username" /></label><div className="people-picker">{people.filter(person => person.id !== user?.id).map(person => { const chosen = selectedPeople.some(item => item.id === person.id); return <button key={person.id} onClick={() => dialog === 'group' ? togglePerson(person) : openDirect(person)}><span>{person.display_name} <small>@{person.username}</small></span>{chosen ? <Check size={16} /> : <Plus size={16} />}</button>})}</div>{dialog === 'group' && <><p className="selected-count">{selectedPeople.length} people selected</p><button className="primary-action" disabled={!groupName.trim() || selectedPeople.length === 0} onClick={createGroup}>Create group</button></>}</section></div>}
+    {messageInfoLoading || messageInfoError || messageInfo ? <div className="dialog-backdrop message-info-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) { setMessageInfo(null); setMessageInfoError('') } }}><section className="message-info-dialog" role="dialog" aria-modal="true" aria-labelledby="message-info-title"><header><div><p className="eyebrow">Group message</p><h2 id="message-info-title">Message info</h2></div><button className="icon-action" onClick={() => { setMessageInfo(null); setMessageInfoError('') }} aria-label="Close message info"><X size={18} /></button></header>{messageInfoLoading ? <p className="message-info-state">Loading receipts…</p> : messageInfoError ? <p className="message-info-state error">{messageInfoError}</p> : messageInfo && <><p className="message-info-preview">{messageInfo.message.body || 'Attachment'}<time>{new Date(messageInfo.message.created_at).toLocaleString()}</time></p>{['read', 'delivered', 'sent'].map(status => { const entries = messageInfo.receipts.filter(receipt => receipt.status === status); return <section className="message-info-status-group" key={status}><h3><span className={`message-info-status-dot ${status}`} />{status === 'read' ? 'Read by' : status === 'delivered' ? 'Delivered to' : 'Sent to'} <span>{entries.length}</span></h3>{entries.length ? entries.map(person => <p key={person.user_id}><strong>{person.display_name}</strong><small>@{person.username}</small></p>) : <p className="message-info-empty">No members yet</p>}</section>})}</>}</section></div> : null}
+    {dialog && <div className="dialog-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) setDialog('') }}><section className="community-dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title"><header><h2 id="dialog-title">{dialog === 'group' ? 'Create a group' : 'New conversation'}</h2><button className="icon-action" onClick={() => setDialog('')} aria-label="Close"><X size={18} /></button></header>{dialog === 'group' && <><label>Group name<input value={groupName} onChange={event => setGroupName(event.target.value)} maxLength={100} /></label><label>Description<textarea value={groupDescription} onChange={event => setGroupDescription(event.target.value)} maxLength={500} rows={3} placeholder="Optional group description" /></label></>}<label>{dialog === 'group' ? 'Add people' : 'Find a person'}<input value={personQuery} onChange={event => setPersonQuery(event.target.value)} placeholder="Search by name or username" /></label><div className="people-picker">{people.filter(person => person.id !== user?.id).map(person => { const chosen = selectedPeople.some(item => item.id === person.id); return <button key={person.id} onClick={() => dialog === 'group' ? togglePerson(person) : openDirect(person)}><span>{person.display_name} <small>@{person.username}</small></span>{chosen ? <Check size={16} /> : <Plus size={16} />}</button>})}</div>{dialog === 'group' && <><p className="selected-count">{selectedPeople.length} people selected</p><button className="primary-action" disabled={!groupName.trim() || selectedPeople.length === 0} onClick={createGroup}>Create group</button></>}</section></div>}
   </section>
 }
