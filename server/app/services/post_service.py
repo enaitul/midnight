@@ -1,8 +1,6 @@
 from datetime import datetime, timezone
-from sqlalchemy import case
 from app import db
 from app.models.post import Post
-from app.models.follow import Follow
 
 
 def create_post(author_id, title, content, status='draft', allow_media_only=False):
@@ -43,11 +41,8 @@ def get_public_posts(page=1, per_page=10, viewer_id=None):
     Includes pagination.
     """
     query = Post.query.filter_by(status='published')
-    if viewer_id:
-        followed_ids = db.session.query(Follow.followed_id).filter_by(follower_id=viewer_id)
-        query = query.order_by(case((Post.author_id.in_(followed_ids), 0), else_=1))
     pagination = query \
-        .order_by(Post.published_at.desc(), Post.created_at.desc()) \
+        .order_by(Post.published_at.desc(), Post.created_at.desc(), Post.id.desc()) \
         .paginate(page=page, per_page=per_page, error_out=False)
 
     return {

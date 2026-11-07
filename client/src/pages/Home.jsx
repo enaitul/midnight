@@ -54,7 +54,10 @@ export default function Home() {
       setError(err.response?.data?.error || 'The writings could not be loaded.')
     } finally { setLoading(false) }
   }
-  useEffect(() => { loadFeed(1) }, [])
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+    loadFeed(1)
+  }, [])
 
   const deletePost = async post => {
     if (!window.confirm('Delete this post? This cannot be undone.')) return
