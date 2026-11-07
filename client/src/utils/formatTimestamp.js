@@ -9,6 +9,5 @@ export function formatTimestamp(value) {
     year: 'numeric',
     hour: 'numeric',
     minute: '2-digit',
-    timeZoneName: 'short',
   })
 }
