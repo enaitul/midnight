@@ -5,6 +5,7 @@ import pytest
 from PIL import Image
 
 from app import create_app, db
+from app.models.conversation import Conversation
 from app.models.post import Post
 from app.models.post_engagement import PostMedia
 from app.models.user import User
@@ -259,6 +260,8 @@ def test_group_admin_can_update_name_and_picture_while_members_cannot(media_app)
     assert updated.status_code == 200
     assert updated.get_json()['conversation']['name'] == 'Updated name'
     assert updated.get_json()['conversation']['description'] == 'A short group description'
+    history = client.get(f'/api/conversations/{group_id}/messages', headers=headers(ids['reader'], app)).get_json()['messages']
+    assert [message['system_event'] for message in history] == ['group_name_changed', 'group_description_changed']
 
     avatar_url = f'/api/conversations/{group_id}/group-avatar'
     denied_picture = client.post(avatar_url, headers=headers(ids['reader'], app), data={
@@ -266,14 +269,30 @@ def test_group_admin_can_update_name_and_picture_while_members_cannot(media_app)
     }, content_type='multipart/form-data')
     assert denied_picture.status_code == 403
 
+    original_bytes = jpeg_bytes()
     uploaded = client.post(avatar_url, headers=headers(ids['author'], app), data={
-        'avatar': (BytesIO(jpeg_bytes()), 'group.jpg', 'image/jpeg'),
+        'avatar': (BytesIO(original_bytes), 'group.jpg', 'image/jpeg'),
     }, content_type='multipart/form-data')
     assert uploaded.status_code == 200, uploaded.get_json()
     conversation = uploaded.get_json()['conversation']
     assert conversation['avatar_url']
-    assert client.get(conversation['avatar_url'], headers=headers(ids['reader'], app)).status_code == 200
-    assert (tmp_path / 'post-media' / 'conversations' / conversation['avatar_url'].rsplit('/', 1)[1]).is_file()
+    avatar_filename = conversation['avatar_url'].rsplit('/', 1)[1]
+    assert client.get(conversation['avatar_url']).status_code == 401
+    assert client.get(conversation['avatar_url'], headers=headers(ids['reader'], app)).data == original_bytes
+    assert (tmp_path / 'post-media' / 'conversations' / avatar_filename).read_bytes() == original_bytes
+    with app.app_context():
+        assert db.session.get(Conversation, group_id).avatar_filename == avatar_filename
+
+    for response in (
+        client.get('/api/conversations', headers=headers(ids['author'], app)),
+        client.get(f'/api/conversations/{group_id}', headers=headers(ids['author'], app)),
+        client.get('/api/conversations', headers=headers(ids['reader'], app)),
+        client.get(f'/api/conversations/{group_id}', headers=headers(ids['reader'], app)),
+    ):
+        assert response.status_code == 200
+        items = response.get_json().get('conversations', [])
+        item = next((item for item in items if item['id'] == group_id), None) if items else response.get_json()['conversation']
+        assert item['avatar_url'] == conversation['avatar_url']
 
     first_picture_url = conversation['avatar_url']
     replacement = client.post(avatar_url, headers=headers(ids['author'], app), data={
@@ -283,10 +302,64 @@ def test_group_admin_can_update_name_and_picture_while_members_cannot(media_app)
     replacement_url = replacement.get_json()['conversation']['avatar_url']
     assert replacement_url != first_picture_url
     assert client.get(replacement_url, headers=headers(ids['reader'], app)).data == image_bytes('JPEG', 'navy')
+    with app.app_context():
+        assert db.session.get(Conversation, group_id).avatar_filename == replacement_url.rsplit('/', 1)[1]
+    assert not (tmp_path / 'post-media' / 'conversations' / avatar_filename).exists()
+    refreshed_list = client.get('/api/conversations', headers=headers(ids['reader'], app)).get_json()['conversations']
+    refreshed_detail = client.get(f'/api/conversations/{group_id}', headers=headers(ids['reader'], app)).get_json()['conversation']
+    assert next(item for item in refreshed_list if item['id'] == group_id)['avatar_url'] == replacement_url
+    assert refreshed_detail['avatar_url'] == replacement_url
 
     removed = client.delete(avatar_url, headers=headers(ids['author'], app))
     assert removed.status_code == 200
     assert removed.get_json()['conversation']['avatar_url'] is None
+    history = client.get(f'/api/conversations/{group_id}/messages', headers=headers(ids['reader'], app)).get_json()['messages']
+    assert [message['system_event'] for message in history[-3:]] == [
+        'group_picture_changed', 'group_picture_changed', 'group_picture_removed',
+    ]
+
+
+def test_group_avatar_private_s3_storage_round_trip(media_app, monkeypatch):
+    app, _, ids = media_app
+    objects = {}
+
+    class FakeBody(BytesIO):
+        def iter_chunks(self, chunk_size):
+            while chunk := self.read(chunk_size):
+                yield chunk
+
+    class FakeS3Storage:
+        def save(self, key, content, content_type=None):
+            objects[key] = (content, content_type)
+
+        def get_object(self, key):
+            content, _ = objects[key]
+            return {'Body': FakeBody(content), 'ContentLength': len(content)}
+
+        def delete(self, key):
+            objects.pop(key, None)
+
+    storage = FakeS3Storage()
+    categories = []
+    monkeypatch.setattr('app.routes.conversations.get_media_storage', lambda category: categories.append(category) or storage)
+    client = app.test_client()
+    group = client.post('/api/conversations/groups', headers=headers(ids['author'], app), json={
+        'name': 'Private storage room', 'member_ids': [ids['reader']],
+    }).get_json()['conversation']
+    response = client.post(f"/api/conversations/{group['id']}/group-avatar", headers=headers(ids['author'], app), data={
+        'avatar': (BytesIO(image_bytes('JPEG', 'navy')), 'private.jpg', 'image/jpeg'),
+    }, content_type='multipart/form-data')
+    assert response.status_code == 200
+    conversation = response.get_json()['conversation']
+    filename = conversation['avatar_url'].rsplit('/', 1)[1]
+    assert filename in objects
+    assert categories == ['conversations']
+    assert client.get(conversation['avatar_url']).status_code == 401
+    fetched = client.get(conversation['avatar_url'], headers=headers(ids['reader'], app))
+    assert fetched.data == image_bytes('JPEG', 'navy')
+    assert fetched.content_type == 'image/jpeg'
+    assert categories == ['conversations', 'conversations']
+    assert client.get('/api/conversations', headers=headers(ids['reader'], app)).get_json()['conversations'][0]['avatar_url'] == conversation['avatar_url']
 
 
 def test_conversation_media_validates_type_and_rejects_empty_message(media_app):

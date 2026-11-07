@@ -31,7 +31,7 @@ def schema_state(revision, *, migrated=False):
             'primary_key': {'id'},
         },
         'messages': {
-            'columns': {'id', 'reply_to_id'},
+            'columns': {'id', 'reply_to_id'} | ({'system_event'} if migrated else set()),
             'indexes': {'ix_messages_reply_to_id'},
             'foreign_keys': {('reply_to_id', 'messages', 'id', 'SET NULL')},
         },
@@ -39,7 +39,7 @@ def schema_state(revision, *, migrated=False):
         'conversation_participants': {
             'columns': {'conversation_id', 'user_id', 'last_delivered_message_id', 'last_read_message_id'},
         },
-        'conversations': {'columns': {'id', 'kind', 'name'} | ({'description', 'avatar_filename'} if migrated else set())},
+        'conversations': {'columns': {'id', 'kind', 'name', 'description', 'avatar_filename'}},
     }
     tables = production_db.PARENT_TABLES | production_db.MIGRATION_TABLES | {'conversation_participants', 'conversations', 'alembic_version'}
     return {'revisions': [revision], 'tables': tables, 'details': details}

@@ -28,6 +28,31 @@ def emit_to_user(user_id, event, payload):
         current_app.logger.exception('Realtime event delivery failed after account data was saved')
 
 
+def record_group_system_events(conversation_id, actor_id, events):
+    """Persist and broadcast group-detail changes as system messages."""
+    if not events:
+        return []
+    conversation = db.session.get(Conversation, conversation_id)
+    if not conversation or conversation.kind != 'group' or not membership(conversation_id, actor_id):
+        return []
+    messages = [Message(
+        conversation_id=conversation_id,
+        sender_id=actor_id,
+        body=body,
+        system_event=event_type,
+    ) for event_type, body in events]
+    try:
+        db.session.add_all(messages)
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        current_app.logger.exception('Could not record group update notices')
+        return []
+    for message in messages:
+        emit_to_conversation_members(conversation_id, 'new_message', message_dict(message))
+    return messages
+
+
 def add_message(conversation_id, sender_id, body, reply_to_id=None):
     if reply_to_id is not None and (isinstance(reply_to_id, bool) or not isinstance(reply_to_id, int)):
         return None, 'Invalid reply target'
@@ -106,6 +131,7 @@ def message_dict(message):
         'id': message.id,
         'conversation_id': message.conversation_id,
         'body': message.body,
+        'system_event': message.system_event,
         'reply_to': ({'id': message.reply_to.id, 'body': message.reply_to.body,
                       'sender': message.reply_to.sender.display_name or message.reply_to.sender.username}
                      if message.reply_to else None),

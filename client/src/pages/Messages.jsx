@@ -702,6 +702,10 @@ export default function Messages() {
   }
 
   const activeRole = activeConversation?.participants?.find(person => person.id === user?.id)?.role
+  const activeListConversation = conversations.find(item => item.id === activeId)
+  const avatarConversation = activeConversation?.kind === 'group' && activeListConversation
+    ? { ...activeConversation, avatar_url: activeListConversation.avatar_url }
+    : activeConversation
   const directPerson = activeConversation?.kind === 'direct' ? activeConversation.participants?.find(person => person.id !== user?.id) : null
   if (loading) return <div className="loading-state"><Loader size={22} className="animate-spin" /></div>
   return <section className={`messages-page${activeId ? ' conversation-open' : ''}`}>
@@ -711,8 +715,12 @@ export default function Messages() {
       {error && <p className="inline-error messages-error">{error}</p>}
       {conversations.length === 0 ? <p className="feed-empty small">Your conversations will appear here.</p> : conversations.map(item => {
         const otherPerson = item.kind === 'direct' ? item.participants?.find(person => person.id !== user?.id) : null
+        const lastMessage = item.last_message
+        const lastMessagePreview = lastMessage?.system_event
+          ? `${lastMessage.sender?.id === user?.id ? 'You' : lastMessage.sender?.display_name || 'A group admin'} ${lastMessage.body}`
+          : lastMessage?.body || 'No messages yet'
         return <button type="button" key={item.id} onClick={() => openConversation(item)} className={`conversation-preview${activeId === item.id ? ' active' : ''}`}>
-        {item.kind === 'group' ? <GroupAvatar key={`${item.id}:${item.avatar_url || 'default'}`} conversation={item} className="conversation-mark" /> : <span className="conversation-mark">{otherPerson?.avatar_url ? <img src={resolveAssetUrl(otherPerson.avatar_url)} alt="" loading="lazy" referrerPolicy="no-referrer" /> : <span aria-hidden="true">{(otherPerson?.display_name || '?').slice(0, 1).toUpperCase()}</span>}</span>}<span className="conversation-copy"><strong>{item.title || item.name || 'Conversation'}</strong><small>{item.last_message?.body || 'No messages yet'}</small></span><span className="conversation-trailing">{!item.unread_count && item.last_message?.created_at && <time className="conversation-time" dateTime={item.last_message.created_at} title={new Date(item.last_message.created_at).toLocaleString()}>{new Date(item.last_message.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</time>}{item.unread_count > 0 && <span className="unread-badge" aria-label={`${item.unread_count} unread messages`}>{item.unread_count}</span>}</span>
+        {item.kind === 'group' ? <GroupAvatar key={`${item.id}:${item.avatar_url || 'default'}`} conversation={item} className="conversation-mark" /> : <span className="conversation-mark">{otherPerson?.avatar_url ? <img src={resolveAssetUrl(otherPerson.avatar_url)} alt="" loading="lazy" referrerPolicy="no-referrer" /> : <span aria-hidden="true">{(otherPerson?.display_name || '?').slice(0, 1).toUpperCase()}</span>}</span>}<span className="conversation-copy"><strong>{item.title || item.name || 'Conversation'}</strong><small>{lastMessagePreview}</small></span><span className="conversation-trailing">{!item.unread_count && item.last_message?.created_at && <time className="conversation-time" dateTime={item.last_message.created_at} title={new Date(item.last_message.created_at).toLocaleString()}>{new Date(item.last_message.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</time>}{item.unread_count > 0 && <span className="unread-badge" aria-label={`${item.unread_count} unread messages`}>{item.unread_count}</span>}</span>
       </button>})}
     </aside>
     <main className="message-thread">
@@ -720,7 +728,7 @@ export default function Messages() {
         <header className="group-info-header"><button type="button" onClick={returnToGroupChat} aria-label="Back to conversation"><ArrowLeft size={19} /><span>Back</span></button><h2>Group info</h2><span /></header>
         <div className="group-info-scroll">
           <section className="group-info-hero">
-            <GroupAvatar key={`${activeConversation.id}:${activeConversation.avatar_url || 'default'}`} conversation={activeConversation} className="group-avatar-large" />
+            <GroupAvatar key={`${activeConversation.id}:${avatarConversation?.avatar_url || 'default'}`} conversation={avatarConversation} className="group-avatar-large" />
             {activeRole === 'admin' && <div className="group-picture-actions">
               <input ref={groupAvatarInputRef} type="file" accept="image/jpeg,image/png,image/webp" onChange={uploadGroupPicture} hidden />
               <button type="button" onClick={() => groupAvatarInputRef.current?.click()} disabled={groupActionBusy}><Camera size={16} />{activeConversation.avatar_url ? 'Change picture' : 'Add picture'}</button>
@@ -767,7 +775,7 @@ export default function Messages() {
         <header className="thread-header">
           <button className="mobile-back" onClick={() => { clearComposer(); setActiveId(null) }} aria-label="Back to conversations"><ArrowLeft size={18} /></button>
           {activeConversation?.kind === 'group' ? <button type="button" className="group-header-trigger" onClick={openGroupInfo} aria-label="Open group information">
-            <GroupAvatar key={`${activeConversation.id}:${activeConversation.avatar_url || 'default'}`} conversation={activeConversation} className="group-avatar-header" />
+            <GroupAvatar key={`${activeConversation.id}:${avatarConversation?.avatar_url || 'default'}`} conversation={avatarConversation} className="group-avatar-header" />
             <span className="thread-person-copy"><strong>{activeConversation.name || 'Group conversation'}</strong><small className="thread-bio">{activeConversation.description || `${activeConversation.participants?.length || 0} members`}</small></span>
           </button> : <>
             {directPerson && <Link className="thread-profile-avatar" to={`/profile/${encodeURIComponent(directPerson.username)}`} aria-label={`View ${directPerson.display_name}'s profile`}>
@@ -797,7 +805,8 @@ export default function Messages() {
             </Link> : <span className="message-avatar-spacer" />
             return <div className="message-day-group" key={message.id}>
               {startsDay && <div className="chat-date-separator"><span>{dayLabel(message.created_at)}</span></div>}
-              <article className={`chat-message${mine ? ' mine' : ''}${startsGroup ? ' group-start' : ''}${endsGroup ? ' group-end' : ''}${pullingMessageId === message.id ? ' is-pulling' : ''}${selectedMessageForInfo?.id === message.id ? ' message-info-selected' : ''}`} style={pullingMessageId === message.id ? { transform: `translateX(${pullOffset}px)` } : undefined} data-message-date={dayKey(message.created_at)} data-date-label={dayLabel(message.created_at)} onContextMenu={event => { if (activeConversation?.kind !== 'group' || !mine) return; event.preventDefault(); setSelectedMessageForInfo(message) }} onPointerDown={event => beginMessagePull(message, event)} onPointerMove={moveMessagePull} onPointerUp={event => finishMessagePull(event)} onPointerCancel={event => finishMessagePull(event, true)}>
+              {message.system_event && <div className="group-system-event" role="status"><span>{message.sender?.id === user?.id ? 'You' : message.sender?.display_name || 'A group admin'} {message.body}</span><time dateTime={message.created_at}>{new Date(message.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</time></div>}
+              {message.system_event ? null : <article className={`chat-message${mine ? ' mine' : ''}${startsGroup ? ' group-start' : ''}${endsGroup ? ' group-end' : ''}${pullingMessageId === message.id ? ' is-pulling' : ''}${selectedMessageForInfo?.id === message.id ? ' message-info-selected' : ''}`} style={pullingMessageId === message.id ? { transform: `translateX(${pullOffset}px)` } : undefined} data-message-date={dayKey(message.created_at)} data-date-label={dayLabel(message.created_at)} onContextMenu={event => { if (activeConversation?.kind !== 'group' || !mine) return; event.preventDefault(); setSelectedMessageForInfo(message) }} onPointerDown={event => beginMessagePull(message, event)} onPointerMove={moveMessagePull} onPointerUp={event => finishMessagePull(event)} onPointerCancel={event => finishMessagePull(event, true)}>
                 {!mine && avatar}
                 <div className="chat-message-stack">
                   {activeConversation?.kind === 'group' && startsGroup && <Link className="chat-sender-name" to={`/profile/${encodeURIComponent(message.sender.username)}`}>{mine ? 'You' : message.sender.display_name}</Link>}
@@ -809,7 +818,7 @@ export default function Messages() {
                     <span className="message-meta"><time dateTime={message.created_at}>{new Date(message.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</time>{mine && activeConversation?.kind === 'direct' && message.delivery_status && <span className={`message-status ${message.delivery_status}`} role="img" aria-label={message.delivery_status} title={message.delivery_status === 'seen' ? 'Seen' : message.delivery_status === 'delivered' ? 'Delivered' : 'Sent'}><Check size={13} />{message.delivery_status !== 'sent' && <Check size={13} />}</span>}</span>
                   </div>
                 </div>
-              </article>
+              </article>}
             </div>
           })}
           {typingName && <div className="typing-indicator" aria-live="polite"><span className="typing-dots"><i /><i /><i /></span>{typingName} is typing</div>}

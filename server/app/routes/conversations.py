@@ -8,7 +8,7 @@ from app.models.conversation import Conversation, ConversationParticipant, Messa
 from app.services.conversation_service import (
     add_group_members, add_message, conversation_dict, leave_group, mark_read,
     group_message_receipts, membership, message_dict, remove_group_member, rename_group, create_direct, create_group,
-    emit_to_conversation_members, emit_to_user, update_group_details, update_group_member_role,
+    emit_to_conversation_members, emit_to_user, record_group_system_events, update_group_details, update_group_member_role,
 )
 from app.utils.auth_middleware import token_required
 from app.storage.media_storage import LocalMediaStorage, get_media_storage
@@ -277,9 +277,14 @@ def rename_conversation(conversation_id):
         return jsonify({'error': 'Conversation not found'}), 404
     data = request.get_json(silent=True) or {}
     new_name = data.get('name')
+    previous_name = conversation.name
     error, status = rename_group(conversation, g.current_user.id, new_name)
     if error:
         return jsonify({'error': error}), status
+    if previous_name != conversation.name:
+        record_group_system_events(conversation_id, g.current_user.id, [
+            ('group_name_changed', f'changed the group name to {conversation.name}.'),
+        ])
     conversation = db.session.get(Conversation, conversation_id)
     payload = conversation_dict(conversation, g.current_user.id)
     emit_to_conversation_members(conversation_id, 'conversation_updated', payload)
@@ -293,11 +298,19 @@ def update_conversation_details(conversation_id):
     if not conversation:
         return jsonify({'error': 'Group not found'}), 404
     data = request.get_json(silent=True) or {}
+    previous_name = conversation.name
+    previous_description = conversation.description or ''
     error, status = update_group_details(
         conversation, g.current_user.id, data.get('name'), data.get('description', ''),
     )
     if error:
         return jsonify({'error': error}), status
+    events = []
+    if previous_name != conversation.name:
+        events.append(('group_name_changed', f'changed the group name to {conversation.name}.'))
+    if previous_description != (conversation.description or ''):
+        events.append(('group_description_changed', 'changed the group description.'))
+    record_group_system_events(conversation_id, g.current_user.id, events)
     payload = conversation_dict(db.session.get(Conversation, conversation_id), g.current_user.id)
     emit_to_conversation_members(conversation_id, 'conversation_updated', payload)
     return jsonify({'conversation': payload}), 200
@@ -371,6 +384,9 @@ def upload_group_avatar(conversation_id):
     if previous_filename:
         try: storage.delete(previous_filename)
         except Exception: current_app.logger.exception('Updated group picture but could not remove the previous file')
+    record_group_system_events(conversation_id, g.current_user.id, [
+        ('group_picture_changed', 'changed the group picture.'),
+    ])
     payload = conversation_dict(conversation, g.current_user.id)
     emit_to_conversation_members(conversation_id, 'conversation_updated', payload)
     return jsonify({'conversation': payload}), 200
@@ -391,6 +407,9 @@ def remove_group_avatar(conversation_id):
     if previous_filename:
         try: get_media_storage(category='conversations').delete(previous_filename)
         except Exception: current_app.logger.exception('Removed group picture metadata but could not remove its file')
+        record_group_system_events(conversation_id, g.current_user.id, [
+            ('group_picture_removed', 'removed the group picture.'),
+        ])
     payload = conversation_dict(conversation, g.current_user.id)
     emit_to_conversation_members(conversation_id, 'conversation_updated', payload)
     return jsonify({'conversation': payload}), 200
@@ -419,10 +438,11 @@ def serve_group_avatar(conversation_id, filename):
                 try: yield from body.iter_chunks(chunk_size=64 * 1024)
                 finally: body.close()
             response = Response(stream_with_context(stream_body()), mimetype=mime_type,
-                                content_length=stored['ContentLength'], direct_passthrough=True)
+                                direct_passthrough=True)
+            response.content_length = stored['ContentLength']
         response.headers['Cache-Control'] = 'private, no-store'
         response.headers['X-Content-Type-Options'] = 'nosniff'
         return response
-    except Exception as error:
-        current_app.logger.warning('Group picture retrieval failed (%s)', type(error).__name__)
+    except Exception:
+        current_app.logger.exception('Group picture retrieval failed')
         return jsonify({'error': 'Group picture is unavailable'}), 404

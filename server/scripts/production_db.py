@@ -14,8 +14,8 @@ SERVER_DIR = Path(__file__).resolve().parents[1]
 PRODUCTION_ENV = SERVER_DIR / '.env.production.local'
 EXPECTED_HOST = 'aws-0-ap-northeast-1.pooler.supabase.com'
 EXPECTED_DATABASE = 'postgres'
-PREVIOUS_REVISION = '8d3c7a2f91b4'
-EXPECTED_REVISION = 'd19b6c4a7e20'
+PREVIOUS_REVISION = 'd19b6c4a7e20'
+EXPECTED_REVISION = 'e4b9a71c2d63'
 EXPECTED_INDEXES = {
     'post_comment_likes': {
         'ix_post_comment_likes_comment_id',
@@ -171,6 +171,7 @@ def show_schema(state):
     conversation_columns = state['details']['conversations']['columns']
     print(f'  column conversations.description: {"present" if "description" in conversation_columns else "missing"}')
     print(f'  column conversations.avatar_filename: {"present" if "avatar_filename" in conversation_columns else "missing"}')
+    print(f'  column messages.system_event: {"present" if "system_event" in state["details"]["messages"]["columns"] else "missing"}')
 
 
 def legacy_schema_is_complete(state):
@@ -201,6 +202,7 @@ def previous_schema_is_complete(state):
         and 'instagram_url' in users['columns']
         and 'last_delivered_message_id' in participant_columns
         and 'last_read_message_id' in participant_columns
+        and {'description', 'avatar_filename'}.issubset(state['details']['conversations']['columns'])
     )
 
 
@@ -208,7 +210,7 @@ def schema_is_complete(state):
     if not previous_schema_is_complete(state):
         return False
     conversation_columns = state['details']['conversations']['columns']
-    return 'description' in conversation_columns and 'avatar_filename' in conversation_columns
+    return 'system_event' in state['details']['messages']['columns']
 
 
 def migration_environment(raw_url, ssl_required):
