@@ -2,6 +2,16 @@ from datetime import datetime, timezone
 from app import db
 
 
+def _utc_isoformat(value):
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    else:
+        value = value.astimezone(timezone.utc)
+    return value.isoformat()
+
+
 class Post(db.Model):
     """
     Post model representing articles, poems, essays, and stories.
@@ -42,9 +52,9 @@ class Post(db.Model):
             'id': self.id,
             'title': self.title,
             'status': self.status,
-            'published_at': self.published_at.isoformat() if self.published_at else None,
-            'created_at': self.created_at.isoformat(),
-            'updated_at': self.updated_at.isoformat(),
+            'published_at': _utc_isoformat(self.published_at),
+            'created_at': _utc_isoformat(self.created_at),
+            'updated_at': _utc_isoformat(self.updated_at),
             'author_id': self.author_id,
             'like_count': PostLike.query.filter_by(post_id=self.id).count(),
             'comment_count': PostComment.query.filter_by(post_id=self.id).count(),
