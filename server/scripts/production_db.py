@@ -14,8 +14,8 @@ SERVER_DIR = Path(__file__).resolve().parents[1]
 PRODUCTION_ENV = SERVER_DIR / '.env.production.local'
 EXPECTED_HOST = 'aws-0-ap-northeast-1.pooler.supabase.com'
 EXPECTED_DATABASE = 'postgres'
-PREVIOUS_REVISION = 'b672a9278ec1'
-EXPECTED_REVISION = '5ac1d4c983e7'
+PREVIOUS_REVISION = '5ac1d4c983e7'
+EXPECTED_REVISION = '8d3c7a2f91b4'
 EXPECTED_INDEXES = {
     'post_comment_likes': {
         'ix_post_comment_likes_comment_id',
@@ -36,7 +36,7 @@ EXPECTED_FOREIGN_KEYS = {
 }
 PARENT_TABLES = {'post_comments', 'messages', 'users'}
 MIGRATION_TABLES = {'post_comment_likes', 'message_media'}
-FEATURE_TABLES = {'messages', 'users'}
+FEATURE_TABLES = {'messages', 'users', 'conversation_participants'}
 
 
 def load_connection():
@@ -165,6 +165,9 @@ def show_schema(state):
     print(f'  index messages.ix_messages_reply_to_id: {"present" if "ix_messages_reply_to_id" in state["details"]["messages"]["indexes"] else "missing"}')
     print(f'  foreign key messages.reply_to_id: {"present" if ("reply_to_id", "messages", "id", "SET NULL") in state["details"]["messages"]["foreign_keys"] else "missing"}')
     print(f'  column users.instagram_url: {"present" if "instagram_url" in state["details"]["users"]["columns"] else "missing"}')
+    participant_columns = state['details']['conversation_participants']['columns']
+    print(f'  column conversation_participants.last_delivered_message_id: {"present" if "last_delivered_message_id" in participant_columns else "missing"}')
+    print(f'  column conversation_participants.last_read_message_id: {"present" if "last_read_message_id" in participant_columns else "missing"}')
 
 
 def legacy_schema_is_complete(state):
@@ -182,7 +185,7 @@ def legacy_schema_is_complete(state):
     return all(state['details'][table]['primary_key'] == {'id'} for table in MIGRATION_TABLES)
 
 
-def schema_is_complete(state):
+def previous_schema_is_complete(state):
     if not legacy_schema_is_complete(state):
         return False
     messages = state['details']['messages']
@@ -192,6 +195,16 @@ def schema_is_complete(state):
         and 'ix_messages_reply_to_id' in messages['indexes']
         and ('reply_to_id', 'messages', 'id', 'SET NULL') in messages['foreign_keys']
         and 'instagram_url' in users['columns']
+    )
+
+
+def schema_is_complete(state):
+    if not previous_schema_is_complete(state):
+        return False
+    participant_columns = state['details']['conversation_participants']['columns']
+    return (
+        'last_delivered_message_id' in participant_columns
+        and 'last_read_message_id' in participant_columns
     )
 
 
@@ -217,7 +230,7 @@ def run_upgrade(raw_url, host, database, app_env, ssl_required, runner=subproces
         raise SystemExit(f'Stopped: expected current revision {PREVIOUS_REVISION}; no migration was run.')
     if not PARENT_TABLES.issubset(before['tables']):
         raise SystemExit('Stopped: one or more migration parent tables are missing; no migration was run.')
-    if not legacy_schema_is_complete(before):
+    if not previous_schema_is_complete(before):
         raise SystemExit('Stopped: the existing messaging and community schema is incomplete; no migration was run.')
 
     try:

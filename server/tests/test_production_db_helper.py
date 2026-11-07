@@ -31,13 +31,16 @@ def schema_state(revision, *, migrated=False):
             'primary_key': {'id'},
         },
         'messages': {
-            'columns': {'id', 'reply_to_id'} if migrated else {'id'},
-            'indexes': {'ix_messages_reply_to_id'} if migrated else set(),
-            'foreign_keys': {('reply_to_id', 'messages', 'id', 'SET NULL')} if migrated else set(),
+            'columns': {'id', 'reply_to_id'},
+            'indexes': {'ix_messages_reply_to_id'},
+            'foreign_keys': {('reply_to_id', 'messages', 'id', 'SET NULL')},
         },
-        'users': {'columns': {'id', 'instagram_url'} if migrated else {'id'}},
+        'users': {'columns': {'id', 'instagram_url'}},
+        'conversation_participants': {
+            'columns': {'conversation_id', 'user_id'} | ({'last_delivered_message_id', 'last_read_message_id'} if migrated else set()),
+        },
     }
-    tables = production_db.PARENT_TABLES | production_db.MIGRATION_TABLES | {'alembic_version'}
+    tables = production_db.PARENT_TABLES | production_db.MIGRATION_TABLES | {'conversation_participants', 'alembic_version'}
     return {'revisions': [revision], 'tables': tables, 'details': details}
 
 

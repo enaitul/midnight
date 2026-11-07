@@ -25,6 +25,8 @@ class ConversationParticipant(db.Model):
     role = db.Column(db.String(12), nullable=False, default='member')
     joined_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
     last_read_at = db.Column(db.DateTime, nullable=True)
+    last_delivered_message_id = db.Column(db.Integer, nullable=True)
+    last_read_message_id = db.Column(db.Integer, nullable=True)
 
     conversation = db.relationship('Conversation', back_populates='participants')
     user = db.relationship('User', back_populates='conversation_memberships')

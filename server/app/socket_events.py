@@ -2,7 +2,7 @@ from flask import request, session
 from flask_socketio import join_room
 from app import db, socketio
 from app.models.user import User
-from app.services.conversation_service import add_message, emit_to_conversation_members, membership, message_dict
+from app.services.conversation_service import add_message, emit_to_conversation_members, mark_delivered, membership, message_dict
 from app.utils.token_util import decode_jwt_token
 
 
@@ -47,6 +47,22 @@ def send_socket_message(data):
     payload = message_dict(message)
     emit_to_conversation_members(conversation_id, 'new_message', payload)
     return {'ok': True, 'message': payload}
+
+
+@socketio.on('message_delivered')
+def acknowledge_message_delivery(data):
+    user_id = session.get('midnight_user_id')
+    if not user_id or not isinstance(data, dict):
+        return {'ok': False, 'error': 'Authentication required'}
+    conversation_id = data.get('conversation_id')
+    message_id = data.get('message_id')
+    if (isinstance(conversation_id, bool) or not isinstance(conversation_id, int)
+            or isinstance(message_id, bool) or not isinstance(message_id, int)):
+        return {'ok': False, 'error': 'Invalid message receipt'}
+    status = mark_delivered(conversation_id, user_id, message_id)
+    if not status:
+        return {'ok': False, 'error': 'Message not found'}
+    return {'ok': True, 'status': status}
 
 
 @socketio.on('typing')

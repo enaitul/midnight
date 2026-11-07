@@ -46,6 +46,30 @@ def add_message(conversation_id, sender_id, body, reply_to_id=None):
     return message, None
 
 
+def message_delivery_status(message):
+    """Return a WhatsApp-style receipt state for outgoing direct messages."""
+    if message.conversation.kind != 'direct':
+        return None
+    recipient = next((participant for participant in message.conversation.participants
+                      if participant.user_id != message.sender_id), None)
+    if not recipient:
+        return 'sent'
+    if recipient.last_read_message_id and recipient.last_read_message_id >= message.id:
+        return 'seen'
+    if recipient.last_read_at and message.created_at:
+        read_at = recipient.last_read_at
+        created_at = message.created_at
+        if read_at.tzinfo is None and created_at.tzinfo is not None:
+            read_at = read_at.replace(tzinfo=created_at.tzinfo)
+        elif created_at.tzinfo is None and read_at.tzinfo is not None:
+            created_at = created_at.replace(tzinfo=read_at.tzinfo)
+        if read_at >= created_at:
+            return 'seen'
+    if recipient.last_delivered_message_id and recipient.last_delivered_message_id >= message.id:
+        return 'delivered'
+    return 'sent'
+
+
 def message_dict(message):
     return {
         'id': message.id,
@@ -55,6 +79,7 @@ def message_dict(message):
                       'sender': message.reply_to.sender.display_name or message.reply_to.sender.username}
                      if message.reply_to else None),
         'created_at': message.created_at.isoformat(),
+        'delivery_status': message_delivery_status(message),
         'media': [item.to_dict() for item in message.media],
         'sender': {
             'id': message.sender.id,
@@ -220,5 +245,40 @@ def mark_read(conversation_id, user_id):
     participant = membership(conversation_id, user_id)
     if participant:
         participant.last_read_at = datetime.now(timezone.utc)
+        latest_message_id = db.session.query(db.func.max(Message.id)).filter_by(conversation_id=conversation_id).scalar()
+        if latest_message_id and (participant.last_read_message_id is None or latest_message_id > participant.last_read_message_id):
+            participant.last_read_message_id = latest_message_id
+        if latest_message_id and (participant.last_delivered_message_id is None or latest_message_id > participant.last_delivered_message_id):
+            participant.last_delivered_message_id = latest_message_id
         db.session.commit()
+        if latest_message_id:
+            emit_to_conversation_members(conversation_id, 'message_receipt', {
+                'conversation_id': conversation_id,
+                'user_id': user_id,
+                'through_message_id': latest_message_id,
+                'status': 'seen',
+            })
     return participant
+
+
+def mark_delivered(conversation_id, user_id, message_id):
+    participant = membership(conversation_id, user_id)
+    message = db.session.get(Message, message_id)
+    if not participant or not message or message.conversation_id != conversation_id or message.sender_id == user_id:
+        return None
+    if participant.last_read_message_id and participant.last_read_message_id >= message_id:
+        status = 'seen'
+        through_message_id = participant.last_read_message_id
+    else:
+        status = 'delivered'
+        if participant.last_delivered_message_id is None or message_id > participant.last_delivered_message_id:
+            participant.last_delivered_message_id = message_id
+            db.session.commit()
+        through_message_id = participant.last_delivered_message_id
+    emit_to_conversation_members(conversation_id, 'message_receipt', {
+        'conversation_id': conversation_id,
+        'user_id': user_id,
+        'through_message_id': through_message_id,
+        'status': status,
+    })
+    return status

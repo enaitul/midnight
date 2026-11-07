@@ -74,7 +74,7 @@ body:has(.messages-page) { overflow: hidden; }
 .shell-content { margin-left: 0; min-width: 0; }
 .app-shell:has(.sidebar) .shell-content { margin-left: 220px; }
 
-.feed-page { width: min(100% - 48px, 760px); margin: 0 auto; padding: 68px 0 80px; }
+.feed-page { width: min(100% - 48px, 760px); margin: 0 auto; padding: 36px 0 80px; }
 .feed-intro { padding: 0 0 44px; }
 .eyebrow { margin: 0 0 13px; color: var(--accent); font: 11px/1.4 Arial, sans-serif; letter-spacing: .14em; text-transform: uppercase; }
 .feed-intro h1 { margin: 0; color: var(--ink); font: 400 clamp(36px, 5vw, 52px)/1.1 Georgia, serif; letter-spacing: -.035em; }
@@ -88,8 +88,9 @@ body:has(.messages-page) { overflow: hidden; }
 .feed-welcome a { margin-left: 8px; color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
 .feed-rule { display: flex; align-items: center; gap: 15px; margin-bottom: 8px; color: var(--muted); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
 .feed-rule:after { content: ''; height: 1px; flex: 1; background: var(--line); }
-.feed-entry { padding: 30px 0 34px; }
-.feed-entry + .feed-entry { border-top: 1px solid var(--line); }
+.feed-list { display: grid; gap: 18px; }
+.feed-entry { padding: 26px 28px 24px; border: 1px solid color-mix(in srgb, var(--line) 82%, transparent); border-radius: 16px; background: color-mix(in srgb, var(--paper) 78%, var(--page)); box-shadow: 0 5px 18px color-mix(in srgb, var(--ink) 4%, transparent); }
+.entry-meta time { color: color-mix(in srgb, var(--muted) 78%, transparent); font-size: 11px; }
 .entry-meta { display: flex; align-items: center; gap: 9px; color: var(--muted); font-size: 12px; }
 .entry-meta img, .avatar-fallback { width: 25px; height: 25px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; object-fit: cover; background: var(--accent-wash); color: var(--accent); }
 .entry-author { color: var(--soft-ink); }
@@ -142,7 +143,7 @@ body:has(.messages-page) { overflow: hidden; }
 .bookmark-control { display: inline-flex; align-items: center; justify-content: center; margin-left: auto; padding: 4px; border: 0; background: transparent; color: var(--muted); cursor: pointer; }
 .bookmark-control.saved, .bookmark-control:hover { color: var(--accent); }
 .post-attachments { display: grid; gap: 15px; margin-top: 19px; }
-.post-attachments figure { margin: 0; }
+.post-attachments figure { overflow: hidden; margin: 0; border: 1px solid var(--line); border-radius: 14px; background: color-mix(in srgb, var(--paper) 84%, var(--page)); }
 .post-attachments img, .post-attachments video { display: block; width: min(100%, 680px); max-height: 620px; object-fit: contain; background: var(--paper); }
 .post-attachments audio { display: block; width: min(100%, 540px); }
 .post-attachments figcaption { margin-top: 5px; color: var(--muted); font-size: 10px; }
@@ -386,7 +387,11 @@ body:has(.messages-page) { overflow: hidden; }
 .chat-message.mine:not(.group-start) .chat-bubble { border-top-right-radius: 7px; }
 .chat-bubble p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; font: 14px/1.55 Georgia, serif; }
 .chat-bubble a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
-.chat-bubble time { position: absolute; right: 9px; bottom: 5px; color: var(--muted); font: 9px/1 Arial, sans-serif; white-space: nowrap; }
+.message-meta { position: absolute; right: 9px; bottom: 5px; display: flex; align-items: center; gap: 4px; color: var(--muted); font: 9px/1 Arial, sans-serif; white-space: nowrap; }
+.message-status { display: inline-flex; align-items: center; color: var(--muted); }
+.message-status svg { flex: 0 0 auto; stroke-width: 2.5; }
+.message-status svg + svg { margin-left: -8px; }
+.message-status.seen { color: #3987d6; }
 .message-avatar-link, .message-avatar-spacer { flex: 0 0 29px; width: 29px; height: 29px; margin-bottom: 2px; }
 .message-avatar-link { display: block; border-radius: 50%; }
 .message-avatar { width: 100%; height: 100%; }
@@ -518,7 +523,7 @@ article .whitespace-pre-wrap { color: var(--soft-ink) !important; }
   .sidebar-account-copy strong { display: none; }
   .shell-content { margin-left: 0; padding-bottom: 65px; }
   .app-shell:has(.sidebar) .shell-content { margin-left: 0; }
-  .feed-page { width: min(100% - 36px, 620px); padding-top: 48px; }
+  .feed-page { width: min(100% - 36px, 620px); padding-top: 24px; }
   .feed-intro { padding-bottom: 33px; }
   .entry-content { font-size: 16px; line-height: 1.8; }
   .entry-meta { font-size: 11px; }
@@ -731,9 +736,12 @@ body { font-size: 1rem; }
 }
 
 @media (max-width: 760px) {
+  .feed-list { gap: 14px; }
+  .feed-entry { padding: 20px 17px 18px; border-radius: 14px; }
+  .post-attachments img, .post-attachments video { max-height: 480px; }
   .conversation-mark img { display: block; width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }
   .conversation-mark > span { display: grid; place-items: center; width: 100%; height: 100%; border-radius: 50%; font: 16px Georgia, serif; }
-  .chat-message { padding-inline: 12px; }
+  .chat-message { padding-inline: 0; }
   .feed-entry-actions { position: relative; display: block; }
   .feed-entry-actions .post-engagement { width: 100%; margin-top: 22px; }
   .feed-entry-actions > .bookmark-control { position: absolute; top: 22px; right: 0; margin: 0; }

@@ -185,6 +185,7 @@ export default function Messages() {
       setMessages(current => current.some(item => item.id === message.id) ? current : [...current, message])
     }
     const incoming = message.sender.id !== user?.id
+    if (incoming) socketRef.current?.emit('message_delivered', { conversation_id: message.conversation_id, message_id: message.id })
     if (incoming && message.conversation_id === activeIdRef.current) {
       communityService.markRead(message.conversation_id).then(() => window.dispatchEvent(new CustomEvent('midnight:conversation-read', { detail: { id: message.conversation_id } }))).catch(() => {})
     }
@@ -253,6 +254,20 @@ export default function Messages() {
     })
     socket.on('disconnect', () => { joinedRoomsRef.current.clear() })
     socket.on('new_message', receiveMessage)
+    socket.on('message_receipt', receipt => {
+      if (receipt.user_id === user?.id) return
+      const updateReceipt = message => {
+        if (message.conversation_id !== receipt.conversation_id || message.sender?.id !== user?.id || message.id > receipt.through_message_id) return message
+        const rank = { sent: 0, delivered: 1, seen: 2 }
+        return (rank[message.delivery_status] || 0) >= rank[receipt.status]
+          ? message
+          : { ...message, delivery_status: receipt.status }
+      }
+      setMessages(current => current.map(updateReceipt))
+      setConversations(current => current.map(item => item.id === receipt.conversation_id && item.last_message
+        ? { ...item, last_message: updateReceipt(item.last_message) }
+        : item))
+    })
     socket.on('typing', payload => {
       if (payload.conversation_id !== activeIdRef.current || payload.user_id === user?.id) return
       setTypingName(payload.is_typing ? payload.display_name : '')
@@ -653,10 +668,9 @@ export default function Messages() {
                     {message.reply_to && <div className="reply-quote"><strong>{message.reply_to.sender}</strong><span>{message.reply_to.body || 'Attachment'}</span></div>}
                     {message.body && <p>{messageLinks(message.body)}</p>}
                     {!!media.length && <div className="message-media-list">{media.map(item => <SharedMessageMedia item={item} key={item.id} />)}</div>}
-                    <time dateTime={message.created_at}>{new Date(message.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</time>
+                    <span className="message-meta"><time dateTime={message.created_at}>{new Date(message.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</time>{mine && activeConversation?.kind === 'direct' && message.delivery_status && <span className={`message-status ${message.delivery_status}`} role="img" aria-label={message.delivery_status} title={message.delivery_status === 'seen' ? 'Seen' : message.delivery_status === 'delivered' ? 'Delivered' : 'Sent'}><Check size={13} />{message.delivery_status !== 'sent' && <Check size={13} />}</span>}</span>
                   </div>
                 </div>
-                {mine && avatar}
               </article>
             </div>
           })}
