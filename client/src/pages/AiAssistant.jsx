@@ -66,6 +66,20 @@ export default function AiAssistant() {
   const historyRef = useRef(null)
 
   useEffect(() => {
+    const viewport = window.visualViewport
+    if (!viewport) return undefined
+    const syncViewport = () => document.documentElement.style.setProperty('--chat-viewport-height', `${viewport.height}px`)
+    syncViewport()
+    viewport.addEventListener('resize', syncViewport)
+    viewport.addEventListener('scroll', syncViewport)
+    return () => {
+      viewport.removeEventListener('resize', syncViewport)
+      viewport.removeEventListener('scroll', syncViewport)
+      document.documentElement.style.removeProperty('--chat-viewport-height')
+    }
+  }, [])
+
+  useEffect(() => {
     historyRef.current?.scrollTo({ top: historyRef.current.scrollHeight, behavior: 'smooth' })
   }, [messages, busy])
 
