@@ -765,7 +765,8 @@ body { font-size: 1rem; }
 :root[data-font="inter"] .font-writing,
 :root[data-font="inter"] .entry-content,
 :root[data-font="inter"] :is(p, label, small, li, a, time, span, h1, h2, h3) { font-family: Inter, Arial, sans-serif !important; }
-:root[data-font="inter"] :is(h1, h2, h3, .wordmark) { font-family: Arial, sans-serif !important; }
+:root[data-font="inter"] :is(h1, h2, h3) { font-family: Arial, sans-serif !important; }
+:root[data-font="inter"] .topbar .wordmark { font-family: Georgia, 'Times New Roman', serif !important; }
 :root[data-font="inter"] :is(em, blockquote, .welcome-line, .feed-intro > p:not(.eyebrow), .writing-night-prompt, .entry-content i) { font-family: Georgia, 'Times New Roman', serif !important; font-style: italic; }
 @media (max-width: 760px) {
   .settings-panel { position: fixed; top: 68px; right: 12px; }
