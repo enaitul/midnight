@@ -61,6 +61,36 @@ def get_public_profile(username):
     return jsonify({'user': public_profile(user, _optional_user_id())}), 200
 
 
+@users_bp.get('/<string:username>/followers')
+def get_user_followers(username):
+    user = User.query.filter_by(username=username).first()
+    if not user:
+        return jsonify({'error': 'User not found'}), 404
+    people = db.session.query(User).join(Follow, Follow.follower_id == User.id).filter(
+        Follow.followed_id == user.id,
+    ).order_by(Follow.created_at.desc(), Follow.id.desc()).all()
+    return jsonify({'users': [
+        {'id': person.id, 'username': person.username, 'display_name': person.display_name or person.username,
+         'avatar_url': person.avatar_url}
+        for person in people
+    ]}), 200
+
+
+@users_bp.get('/<string:username>/following')
+def get_user_following(username):
+    user = User.query.filter_by(username=username).first()
+    if not user:
+        return jsonify({'error': 'User not found'}), 404
+    people = db.session.query(User).join(Follow, Follow.followed_id == User.id).filter(
+        Follow.follower_id == user.id,
+    ).order_by(Follow.created_at.desc(), Follow.id.desc()).all()
+    return jsonify({'users': [
+        {'id': person.id, 'username': person.username, 'display_name': person.display_name or person.username,
+         'avatar_url': person.avatar_url}
+        for person in people
+    ]}), 200
+
+
 @users_bp.post('/<string:username>/follow')
 @token_required
 def follow_user(username):

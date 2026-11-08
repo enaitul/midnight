@@ -1,41 +1,76 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { postService } from '../services/posts'
 import { useAuth } from '../context/AuthContext'
 import { Loader, AlertCircle, Edit3, Trash2, Plus, FileText, Globe } from 'lucide-react'
 import PostMediaDisplay from '../components/PostMediaDisplay'
 import { formatTimestamp } from '../utils/formatTimestamp'
+import InfiniteScrollSentinel from '../components/InfiniteScrollSentinel'
 
 export default function MyWritings() {
   const [activeTab, setActiveTab] = useState('all') // 'all', 'draft', 'published'
   const [posts, setPosts] = useState([])
   const [loading, setLoading] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [nextPage, setNextPage] = useState(2)
+  const [hasMore, setHasMore] = useState(false)
   const [error, setError] = useState(null)
+  const loadingMoreRef = useRef(false)
+  const generationRef = useRef(0)
 
   const { isAuthenticated } = useAuth()
   const navigate = useNavigate()
 
-  const fetchPosts = async () => {
+  useEffect(() => {
+    const generation = ++generationRef.current
+    loadingMoreRef.current = false
+    setLoadingMore(false)
+    setPosts([])
+    setNextPage(2)
+    setHasMore(false)
     setLoading(true)
     setError(null)
-    try {
-      const filter = activeTab === 'all' ? '' : activeTab
-      const data = await postService.getMyPosts(filter)
-      setPosts(data.posts || [])
-    } catch (err) {
-      setError(err.response?.data?.error || 'Failed to retrieve your writings.')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  useEffect(() => {
     if (!isAuthenticated) {
       navigate('/login')
+      setLoading(false)
       return
     }
-    fetchPosts()
+    const filter = activeTab === 'all' ? '' : activeTab
+    postService.getMyPosts(filter, 1, 15).then(data => {
+      if (generation !== generationRef.current) return
+      setPosts(data.posts || [])
+      setNextPage((data.page || 1) + 1)
+      setHasMore(Boolean(data.has_next))
+    }).catch(err => {
+      if (generation === generationRef.current) setError(err.response?.data?.error || 'Failed to retrieve your writings.')
+    }).finally(() => { if (generation === generationRef.current) setLoading(false) })
+    return () => { if (generation === generationRef.current) generationRef.current += 1 }
   }, [activeTab, isAuthenticated, navigate])
+
+  const loadMore = async () => {
+    if (!hasMore || loading || loadingMoreRef.current) return
+    const generation = generationRef.current
+    loadingMoreRef.current = true
+    setLoadingMore(true)
+    try {
+      const filter = activeTab === 'all' ? '' : activeTab
+      const data = await postService.getMyPosts(filter, nextPage, 15)
+      if (generation !== generationRef.current) return
+      setPosts(current => [...current, ...(data.posts || [])])
+      setNextPage((data.page || nextPage) + 1)
+      setHasMore(Boolean(data.has_next))
+    } catch (err) {
+      if (generation === generationRef.current) {
+        setError(err.response?.data?.error || 'More writings could not be loaded.')
+        setHasMore(false)
+      }
+    } finally {
+      if (generation === generationRef.current) {
+        loadingMoreRef.current = false
+        setLoadingMore(false)
+      }
+    }
+  }
 
   const handleDelete = async (postId, title) => {
     if (!window.confirm(`Are you sure you want to delete "${title}"?`)) {
@@ -189,6 +224,8 @@ export default function MyWritings() {
               </div>
             </div>
           ))}
+          <InfiniteScrollSentinel enabled={hasMore && !loading && !loadingMore} onVisible={loadMore} />
+          {loadingMore && <div className="infinite-scroll-loading" role="status"><Loader className="w-5 h-5 text-accent animate-spin" /> Loading more writings</div>}
         </div>
       )}
     </div>

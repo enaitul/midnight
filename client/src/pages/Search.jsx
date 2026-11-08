@@ -1,39 +1,39 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { AlertCircle, ChevronLeft, ChevronRight, Loader, Search as SearchIcon, User as UserIcon } from 'lucide-react'
+import { AlertCircle, Loader, Search as SearchIcon, User as UserIcon } from 'lucide-react'
 import { communityService } from '../services/community'
 import PostMediaDisplay from '../components/PostMediaDisplay'
 import { resolveAssetUrl } from '../services/api'
 import { formatTimestamp } from '../utils/formatTimestamp'
+import InfiniteScrollSentinel from '../components/InfiniteScrollSentinel'
 
 export default function Search() {
   const [query, setQuery] = useState('')
   const [tab, setTab] = useState('writings')
-  const [page, setPage] = useState(1)
+  const [nextPage, setNextPage] = useState(2)
   const [results, setResults] = useState([])
-  const [pagination, setPagination] = useState({ page: 1, pages: 0, total: 0, has_next: false, has_prev: false })
+  const [hasMore, setHasMore] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [error, setError] = useState('')
+  const loadingMoreRef = useRef(false)
+  const generationRef = useRef(0)
 
-  // When changing tabs, reset page to 1
   const handleTabChange = (newTab) => {
-    if (newTab !== tab) {
-      setTab(newTab)
-      setPage(1)
-    }
+    if (newTab !== tab) setTab(newTab)
   }
 
-  // When query changes, reset page to 1
-  const handleQueryChange = (val) => {
-    setQuery(val)
-    setPage(1)
-  }
+  const handleQueryChange = val => setQuery(val)
 
   useEffect(() => {
     const term = query.trim()
+    const generation = ++generationRef.current
+    loadingMoreRef.current = false
+    setLoadingMore(false)
+    setResults([])
+    setNextPage(2)
+    setHasMore(false)
     if (!term) {
-      setResults([])
-      setPagination({ page: 1, pages: 0, total: 0, has_next: false, has_prev: false })
       setLoading(false)
       setError('')
       return undefined
@@ -45,15 +45,11 @@ export default function Search() {
 
     const timeout = window.setTimeout(async () => {
       try {
-        const data = await communityService.search(term, tab, page, controller.signal)
+        const data = await communityService.search(term, tab, 1, controller.signal)
+        if (generation !== generationRef.current) return
         setResults(data.results || [])
-        setPagination({
-          page: data.page,
-          pages: data.pages,
-          total: data.total,
-          has_next: data.has_next,
-          has_prev: data.has_prev,
-        })
+        setNextPage((data.page || 1) + 1)
+        setHasMore(Boolean(data.has_next))
       } catch (err) {
         if (err.name !== 'CanceledError' && err.name !== 'AbortError') {
           setError(err.response?.data?.error || 'Search could not be completed.')
@@ -67,7 +63,32 @@ export default function Search() {
       window.clearTimeout(timeout)
       controller.abort()
     }
-  }, [query, tab, page])
+  }, [query, tab])
+
+  const loadMore = async () => {
+    const term = query.trim()
+    const generation = generationRef.current
+    if (!term || !hasMore || loading || loadingMoreRef.current) return
+    loadingMoreRef.current = true
+    setLoadingMore(true)
+    try {
+      const data = await communityService.search(term, tab, nextPage)
+      if (generation !== generationRef.current) return
+      setResults(current => [...current, ...(data.results || [])])
+      setNextPage((data.page || nextPage) + 1)
+      setHasMore(Boolean(data.has_next))
+    } catch (err) {
+      if (generation === generationRef.current) {
+        setError(err.response?.data?.error || 'More results could not be loaded.')
+        setHasMore(false)
+      }
+    } finally {
+      if (generation === generationRef.current) {
+        loadingMoreRef.current = false
+        setLoadingMore(false)
+      }
+    }
+  }
 
   return (
     <section className="community-page search-page">
@@ -146,34 +167,8 @@ export default function Search() {
                 </Link>
               ))}
 
-          {/* Pagination Controls */}
-          {pagination.pages > 1 && (
-            <div className="flex items-center justify-between pt-6 mt-4 border-t border-[#1f1f28]">
-              <button
-                type="button"
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-                disabled={!pagination.has_prev}
-                className="flex items-center gap-1 text-xs text-muted hover:text-primary disabled:opacity-30 disabled:hover:text-muted transition"
-              >
-                <ChevronLeft size={16} />
-                <span>Previous</span>
-              </button>
-
-              <span className="text-xs text-muted">
-                Page {pagination.page} of {pagination.pages} ({pagination.total} results)
-              </span>
-
-              <button
-                type="button"
-                onClick={() => setPage((p) => p + 1)}
-                disabled={!pagination.has_next}
-                className="flex items-center gap-1 text-xs text-muted hover:text-primary disabled:opacity-30 disabled:hover:text-muted transition"
-              >
-                <span>Next</span>
-                <ChevronRight size={16} />
-              </button>
-            </div>
-          )}
+          <InfiniteScrollSentinel enabled={hasMore && !loading && !loadingMore && results.length > 0} onVisible={loadMore} />
+          {loadingMore && <div className="infinite-scroll-loading" role="status"><Loader size={17} className="animate-spin" /> Loading more results</div>}
         </div>
       )}
     </section>

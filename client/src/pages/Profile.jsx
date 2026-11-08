@@ -19,6 +19,10 @@ export default function Profile() {
   const [saved, setSaved] = useState([])
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [connectionType, setConnectionType] = useState('')
+  const [connections, setConnections] = useState([])
+  const [connectionsLoading, setConnectionsLoading] = useState(false)
+  const [connectionsError, setConnectionsError] = useState('')
 
   useEffect(() => {
     if (authLoading) return
@@ -43,6 +47,19 @@ export default function Profile() {
   useEffect(() => {
     if (ownPage && savedTab) communityService.getSaved().then(setSaved).catch(err => setError(err.response?.data?.error || 'Saved writings could not be loaded.'))
   }, [ownPage, savedTab])
+
+  useEffect(() => {
+    if (!connectionType) return undefined
+    let active = true
+    setConnections([])
+    setConnectionsError('')
+    setConnectionsLoading(true)
+    const load = connectionType === 'followers' ? communityService.getFollowers(username) : communityService.getFollowing(username)
+    load.then(people => { if (active) setConnections(people) })
+      .catch(err => { if (active) setConnectionsError(err.response?.data?.error || 'This list could not be loaded.') })
+      .finally(() => { if (active) setConnectionsLoading(false) })
+    return () => { active = false }
+  }, [connectionType, username])
 
   const update = (key, value) => setProfile(current => ({ ...current, [key]: value }))
   const saveProfile = async event => {
@@ -89,7 +106,7 @@ export default function Profile() {
           {!ownPage && <div className="profile-actions"><FollowButton profile={profile} isAuthenticated={isAuthenticated} onChange={result => setProfile(current => ({ ...current, is_following: result.is_following, follower_count: result.follower_count }))} onError={setError} />{isAuthenticated && <button className="outline-action" onClick={() => navigate(`/messages?user=${encodeURIComponent(profile.username)}`)}><MessageCircle size={16} /> Message</button>}</div>}
           {ownPage && <div className="profile-actions"><button type="button" className="profile-icon-action" onClick={() => setEditing(!editing)} disabled={saving} aria-label={editing ? 'Cancel profile editing' : 'Edit profile'} title={editing ? 'Cancel editing' : 'Edit profile'}>{editing ? <X size={17} /> : <Pencil size={16} />}</button><button type="button" className="profile-icon-action" onClick={() => { logout(); navigate('/') }} aria-label="Log out" title="Log out"><LogOut size={16} /></button></div>}
         </div>
-        <div className="profile-counts" aria-label="Profile statistics"><span><strong>{profile.contributions || 0}</strong> writings</span><span><strong>{profile.follower_count || 0}</strong> followers</span><span><strong>{profile.following_count || 0}</strong> following</span></div>
+        <div className="profile-counts" aria-label="Profile statistics"><span><strong>{profile.contributions || 0}</strong> writings</span><button type="button" onClick={() => setConnectionType('followers')} aria-label={`${profile.follower_count || 0} followers`}><strong>{profile.follower_count || 0}</strong> followers</button><button type="button" onClick={() => setConnectionType('following')} aria-label={`${profile.following_count || 0} following`}><strong>{profile.following_count || 0}</strong> following</button></div>
         {!editing && <div className="profile-bio">
           <strong className="profile-display-name">{profile.display_name || profile.username}</strong>
           {profile.biography ? <p>{profile.biography}</p> : ownPage ? <p className="profile-empty-bio">Your biography is still unwritten.</p> : null}
@@ -110,6 +127,7 @@ export default function Profile() {
     </form>}
     <div className="profile-tabs" role="tablist" aria-label="Profile writings"><button role="tab" aria-selected={!savedTab} className={!savedTab ? 'active' : ''} onClick={() => setSavedTab(false)}><BookOpen size={14} /> Writings</button>{ownPage && <button role="tab" aria-selected={savedTab} className={savedTab ? 'active' : ''} onClick={() => setSavedTab(true)}><BookOpen size={14} /> Saved</button>}</div>
     <WritingGrid posts={posts} emptyMessage={savedTab ? 'Writings you save will be kept here.' : 'No published writings yet.'} />
+    {connectionType && <div className="dialog-backdrop profile-connections-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) setConnectionType('') }}><section className="profile-connections-dialog" role="dialog" aria-modal="true" aria-labelledby="profile-connections-title"><header><h2 id="profile-connections-title">{connectionType === 'followers' ? 'Followers' : 'Following'}</h2><button type="button" className="icon-action" onClick={() => setConnectionType('')} aria-label="Close list"><X size={18} /></button></header>{connectionsLoading ? <div className="profile-connections-state"><Loader size={20} className="animate-spin" /></div> : connectionsError ? <p className="inline-error">{connectionsError}</p> : connections.length ? <div className="profile-connections-list">{connections.map(person => <Link to={`/profile/${encodeURIComponent(person.username)}`} key={person.id} onClick={() => setConnectionType('')}><span className="profile-connection-avatar">{person.avatar_url ? <img src={resolveAssetUrl(person.avatar_url)} alt="" referrerPolicy="no-referrer" /> : <UserIcon size={18} />}</span><span><strong>{person.display_name}</strong><small>@{person.username}</small></span></Link>)}</div> : <p className="profile-connections-state">No {connectionType} yet.</p>}</section></div>}
   </section>
 }
 

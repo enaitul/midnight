@@ -2,12 +2,13 @@ import { useState, useEffect, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { postService } from '../services/posts'
 import { useAuth } from '../context/AuthContext'
-import { Loader, AlertCircle, ChevronLeft, ChevronRight, User as UserIcon, MoreVertical, Edit3, Trash2 } from 'lucide-react'
+import { Loader, AlertCircle, User as UserIcon, MoreVertical, Edit3, Trash2 } from 'lucide-react'
 import BookmarkButton from '../components/BookmarkButton'
 import PostEngagement from '../components/PostEngagement'
 import PostMediaDisplay from '../components/PostMediaDisplay'
 import { resolveAssetUrl } from '../services/api'
 import { formatTimestamp } from '../utils/formatTimestamp'
+import InfiniteScrollSentinel from '../components/InfiniteScrollSentinel'
 
 function PostOwnerMenu({ post, onDelete, deleting }) {
   const [open, setOpen] = useState(false)
@@ -38,22 +39,32 @@ function PostOwnerMenu({ post, onDelete, deleting }) {
 
 export default function Home() {
   const [posts, setPosts] = useState([])
-  const [pagination, setPagination] = useState({ page: 1, pages: 1, total: 0 })
+  const [nextPage, setNextPage] = useState(1)
+  const [hasMore, setHasMore] = useState(true)
   const [loading, setLoading] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [error, setError] = useState(null)
   const [deletingPostId, setDeletingPostId] = useState(null)
+  const loadingMoreRef = useRef(false)
   const { user, isAuthenticated } = useAuth()
 
-  const loadFeed = async (page = 1) => {
-    setLoading(true)
+  const loadFeed = async (page = 1, append = false) => {
+    if (append && loadingMoreRef.current) return
+    if (append) { loadingMoreRef.current = true; setLoadingMore(true) }
+    else { setLoading(true); setPosts([]); setNextPage(1); setHasMore(true) }
     setError(null)
     try {
       const data = await postService.getFeed(page, 8)
-      setPosts(data.posts || [])
-      setPagination({ page: data.page, pages: data.pages, total: data.total })
+      setPosts(current => append ? [...current, ...(data.posts || [])] : data.posts || [])
+      setNextPage((data.page || page) + 1)
+      setHasMore(Boolean(data.has_next))
     } catch (err) {
       setError(err.response?.data?.error || 'The writings could not be loaded.')
-    } finally { setLoading(false) }
+      if (append) setHasMore(false)
+    } finally {
+      if (append) { loadingMoreRef.current = false; setLoadingMore(false) }
+      else setLoading(false)
+    }
   }
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'smooth' })
@@ -66,8 +77,7 @@ export default function Home() {
     setError(null)
     try {
       await postService.deletePost(post.id)
-      const nextPage = Math.min(pagination.page, Math.max(1, Math.ceil((pagination.total - 1) / 8)))
-      await loadFeed(nextPage)
+      setPosts(current => current.filter(item => item.id !== post.id))
     } catch (err) {
       setError(err.response?.data?.error || 'The post could not be deleted.')
     } finally { setDeletingPostId(null) }
@@ -98,7 +108,8 @@ export default function Home() {
           <BookmarkButton postId={post.id} isAuthenticated={isAuthenticated} />
         </div>
       </article>)}
-      {pagination.pages > 1 && <div className="pagination"><button onClick={() => loadFeed(pagination.page - 1)} disabled={pagination.page <= 1}><ChevronLeft size={16} /> Previous</button><span>{pagination.page} / {pagination.pages}</span><button onClick={() => loadFeed(pagination.page + 1)} disabled={pagination.page >= pagination.pages}>Next <ChevronRight size={16} /></button></div>}
+      <InfiniteScrollSentinel enabled={hasMore && !loading && !loadingMore} onVisible={() => loadFeed(nextPage, true)} />
+      {loadingMore && <div className="infinite-scroll-loading" role="status"><Loader size={18} className="animate-spin" /> Loading more writings</div>}
     </div>}
   </div>
 }

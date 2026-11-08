@@ -2,6 +2,8 @@ import api from './api'
 
 export const communityService = {
   getProfile: async (username) => (await api.get(`/users/${encodeURIComponent(username)}`)).data.user,
+  getFollowers: async username => (await api.get(`/users/${encodeURIComponent(username)}/followers`)).data.users,
+  getFollowing: async username => (await api.get(`/users/${encodeURIComponent(username)}/following`)).data.users,
   follow: async username => (await api.post(`/users/${encodeURIComponent(username)}/follow`)).data,
   unfollow: async username => (await api.delete(`/users/${encodeURIComponent(username)}/follow`)).data,
   notifications: async () => (await api.get('/notifications')).data,
