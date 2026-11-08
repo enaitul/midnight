@@ -14,6 +14,7 @@ import Profile from './pages/Profile'
 import About from './pages/About'
 import Creator from './pages/Creator'
 import Notifications from './pages/Notifications'
+import AiAssistant from './pages/AiAssistant'
 import { useAuth } from './context/AuthContext'
 
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || ''
@@ -41,6 +42,7 @@ function App() {
                 <Route path="/post/:id" element={<PostDetail />} />
                 <Route path="/my-writings" element={<MyWritings />} />
                 <Route path="/messages" element={<Messages />} />
+                <Route path="/assistant" element={<AiAssistant />} />
                 <Route path="/notifications" element={<Notifications />} />
                 <Route path="/search" element={<Search />} />
                 <Route path="/account" element={<AccountRedirect />} />

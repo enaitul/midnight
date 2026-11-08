@@ -1,7 +1,7 @@
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '../context/AuthContext'
-import { Settings, User as UserIcon, LogIn, LogOut, PenLine, House, MessageCircle, Search, CircleHelp, Bell, Moon, Type } from 'lucide-react'
+import { Settings, User as UserIcon, LogIn, LogOut, PenLine, House, MessageCircle, Search, CircleHelp, Bell, Moon, Type, Sparkles } from 'lucide-react'
 import { io } from 'socket.io-client'
 import { communityService } from '../services/community'
 import { resolveAssetUrl } from '../services/api'
@@ -10,6 +10,7 @@ const navItems = [
   { to: '/', label: 'Feed', Icon: House, end: true },
   { to: '/write', label: 'New post', Icon: PenLine },
   { to: '/messages', label: 'Messages', Icon: MessageCircle },
+  { to: '/assistant', label: 'Talk to Pablo', Icon: Sparkles },
   { to: '/notifications', label: 'Notifications', Icon: Bell },
   { to: '/search', label: 'Search', Icon: Search },
 ]
@@ -148,12 +149,13 @@ export default function Navbar() {
       </section>}
     </header>
     {!isAuthPage && <aside className="sidebar" aria-label="Main navigation">
-      <nav>{navItems.map(({ to, label, Icon, end }) => <NavLink key={to} to={to} end={end} aria-label={label} title={label} className={({ isActive }) => `side-link${isActive ? ' active' : ''}${to === '/notifications' ? ' notifications-nav-link' : ''}`}>
+      <nav>{navItems.map(({ to, label, Icon, end }) => <NavLink key={to} to={to} end={end} aria-label={label} title={label} className={({ isActive }) => `side-link${isActive ? ' active' : ''}${to === '/notifications' ? ' notifications-nav-link' : ''}${to === '/assistant' ? ' ai-nav-link' : ''}`}>
         <Icon size={18} strokeWidth={1.7} /><span>{label}</span>{to === '/messages' && unreadMessages > 0 && <b className="nav-unread" aria-label={`${unreadMessages} unread messages`}>{unreadMessages > 99 ? '99+' : unreadMessages}</b>}{to === '/notifications' && unreadNotifications > 0 && <b className="nav-unread notification-nav-unread" aria-label={`${unreadNotifications} unread notifications`}>{unreadNotifications > 99 ? '99+' : unreadNotifications}</b>}
       </NavLink>)}<Link to={accountUrl} className={`side-link side-profile-link${location.pathname.startsWith('/profile/') || location.pathname === '/account' ? ' active' : ''}`} aria-label={isAuthenticated ? 'Profile' : 'Sign in'} title={isAuthenticated ? 'Profile' : 'Sign in'}>
         {isAuthenticated ? (user?.avatar_url ? <img className="side-profile-avatar" src={resolveAssetUrl(user.avatar_url)} alt="" referrerPolicy="no-referrer" /> : <span className="side-profile-avatar side-profile-avatar-fallback"><UserIcon size={17} /></span>) : <LogIn size={19} strokeWidth={1.8} />}
         <span>{isAuthenticated ? 'Profile' : 'Sign in'}</span>
       </Link></nav>
     </aside>}
+    {!isAuthPage && <Link to="/assistant" className="ai-mobile-fab" aria-label="Talk to Pablo" title="Talk to Pablo"><Sparkles size={22} strokeWidth={1.8} /></Link>}
   </>
 }
