@@ -4,8 +4,6 @@ import creatorImage from '../assets/images/creator.png'
 export default function Creator() {
   return (
     <article className="community-page creator-page">
-      <p className="eyebrow">About the Creator</p>
-
       <div className="creator-layout">
         <img
           src={creatorImage}

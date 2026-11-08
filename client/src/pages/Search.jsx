@@ -92,7 +92,6 @@ export default function Search() {
 
   return (
     <section className="community-page search-page">
-      <p className="eyebrow">Find a voice or a page</p>
       <h1>Search</h1>
 
       <label className="search-box">

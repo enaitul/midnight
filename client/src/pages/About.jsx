@@ -57,7 +57,6 @@ export default function About() {
   return (
     <article className="community-page about-page">
       <div className="about-topline">
-        <p className="eyebrow">Philosophy of midnight.</p>
         <button className="outline-action about-feedback-trigger" type="button" onClick={() => setFeedbackOpen(true)}>
           <MessageCircle size={15} /> Feedback
         </button>
@@ -92,7 +91,6 @@ export default function About() {
       <section className="creator-card">
         <img src={creatorImage} alt="Md Enaitul Hoque, creator of midnight." />
         <div>
-          <p className="eyebrow">About the creator</p>
           <h2>Md Enaitul Hoque</h2>
           <p>
             Built midnight. as an antidote to the hyper-optimized web—a sanctuary for heartfelt writing and meaningful human connection.
@@ -119,7 +117,6 @@ export default function About() {
             />
             <header className="feedback-dialog-header">
               <div>
-                <p className="eyebrow">A note for midnight.</p>
                 <h2 id="feedback-title">Share your feedback</h2>
               </div>
               <button className="icon-action" type="button" onClick={closeFeedback} aria-label="Close feedback form">

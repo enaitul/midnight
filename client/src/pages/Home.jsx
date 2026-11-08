@@ -85,9 +85,6 @@ export default function Home() {
 
   return <div className="feed-page">
     <header className="feed-intro">
-      <p className="welcome-line">{isAuthenticated ? `Welcome back, ${user?.display_name || user?.username}.` : 'Welcome to midnight.'}{' '}
-        <Link to={isAuthenticated ? '/write' : '/register'}>Begin a new page?</Link>
-      </p>
       <h1>Recent writings</h1>
     </header>
     {error && <div className="message-error"><AlertCircle size={17} />{error}</div>}

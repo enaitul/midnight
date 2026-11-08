@@ -697,7 +697,7 @@ export default function Messages() {
   if (loading) return <div className="loading-state"><Loader size={22} className="animate-spin" /></div>
   return <section className={`messages-page${activeId ? ' conversation-open' : ''}`}>
     <aside className="conversation-list">
-      <div className="messages-heading"><div><p className="eyebrow">A note between people</p><h1>Messages</h1></div><button className="icon-action" onClick={() => { setDialog('direct'); setError('') }} aria-label="Start a conversation" title="Start a conversation"><Plus size={18} /></button></div>
+      <div className="messages-heading"><div><h1>Messages</h1></div><button className="icon-action" onClick={() => { setDialog('direct'); setError('') }} aria-label="Start a conversation" title="Start a conversation"><Plus size={18} /></button></div>
       <div className="message-list-actions"><button className="text-action" onClick={() => { setDialog('group'); setError(''); setGroupName(''); setGroupDescription(''); setPersonQuery(''); setSelectedPeople([]) }}><Users size={15} /> New group</button></div>
       {error && <p className="inline-error messages-error">{error}</p>}
       {conversations.length === 0 ? <p className="feed-empty small">Your conversations will appear here.</p> : conversations.map(item => {

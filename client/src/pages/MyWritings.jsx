@@ -91,9 +91,6 @@ export default function MyWritings() {
       <div className="flex items-center justify-between mb-8 pb-4 border-b border-[#22222d]">
         <div>
           <h1 className="font-heading text-3xl font-bold tracking-tight mb-1">My Writings</h1>
-          <p className="font-writing text-muted text-xs italic">
-            Your personal sanctuary of drafts and published pieces.
-          </p>
         </div>
 
         <Link

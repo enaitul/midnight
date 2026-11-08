@@ -35,7 +35,7 @@ export default function Notifications() {
   }, [])
 
   return <section className="community-page notifications-page">
-    <p className="eyebrow">A little sign of connection</p><h1><Bell size={25} strokeWidth={1.5} /> Notifications</h1>
+    <h1><Bell size={25} strokeWidth={1.5} /> Notifications</h1>
     {error && <p className="inline-error">{error}</p>}
     {loading ? <div className="loading-state"><Loader size={22} className="animate-spin" /></div> : items.length === 0 ? <p className="feed-empty">Nothing new just yet.</p> : <div className="notification-list">{items.map(item => {
       const Icon = iconFor(item.kind)
