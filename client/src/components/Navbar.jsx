@@ -135,9 +135,9 @@ export default function Navbar() {
           <h2><Type size={15} /> Font style</h2>
           <div className="settings-choice-row settings-font-choices" role="group" aria-label="Font style">
             <button type="button" aria-pressed={fontStyle === 'classic'} className={fontStyle === 'classic' ? 'selected' : ''} onClick={() => setFontStyle('classic')}><span className="font-choice-serif">Aa</span><small>Classic</small></button>
-            <button type="button" aria-pressed={fontStyle === 'inter'} className={fontStyle === 'inter' ? 'selected' : ''} onClick={() => setFontStyle('inter')}><span className="font-choice-inter">Aa</span><small>Inter + Arial</small></button>
+            <button type="button" aria-pressed={fontStyle === 'inter'} className={fontStyle === 'inter' ? 'selected' : ''} onClick={() => setFontStyle('inter')}><span className="font-choice-inter">Aa</span><small>Modern</small></button>
           </div>
-          <p className="settings-hint">Inter for reading, Arial headings, and Georgia italics.</p>
+          <p className="settings-hint">Modern text, Arial headings, and Georgia italics.</p>
         </div>
         <div className="settings-group settings-feedback-row">
           <span>Help shape midnight</span>
