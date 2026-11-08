@@ -85,6 +85,7 @@ export default function Home() {
 
   return <div className="feed-page">
     <header className="feed-intro">
+      <p className="welcome-line">Welcome to midnight. <Link to={isAuthenticated ? '/write' : '/register'}>Start a post?</Link></p>
       <h1>Recent writings</h1>
     </header>
     {error && <div className="message-error"><AlertCircle size={17} />{error}</div>}
